@@ -528,10 +528,12 @@ def admin_dashboard():
             total = cur.fetchone()["total"]
             cur.execute(
                 """
-                SELECT factor_name, predicted_class, COUNT(*) AS jumlah
+                SELECT factor_name,
+                       COALESCE(training_label, predicted_class, rule_class) AS result_class,
+                       COUNT(*) AS jumlah
                 FROM factor_results
-                GROUP BY factor_name, predicted_class
-                ORDER BY factor_name, predicted_class
+                GROUP BY factor_name, result_class
+                ORDER BY factor_name, result_class
                 """
             )
             distribution = cur.fetchall()
