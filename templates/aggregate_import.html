@@ -41,7 +41,7 @@
 {% if report.respondents %}
 <section class="aggregate-kpis">
   <article class="stat-card"><span class="stat-label">Jumlah submission</span><strong>{{ report.respondents }}</strong><span class="stat-foot">Sesuai filter aktif</span></article>
-  <article class="stat-card"><span class="stat-label">Nama responden unik</span><strong>{{ report.unique_employees }}</strong><span class="stat-foot">Bukan ID unik jika kode tidak disediakan</span></article>
+  <article class="stat-card"><span class="stat-label">Identitas responden unik</span><strong>{{ report.unique_employees }}</strong><span class="stat-foot">Bukan ID unik jika kode tidak disediakan</span></article>
   <article class="stat-card"><span class="stat-label">Rata-rata total skor</span><strong>{{ report.average_total }}</strong><span class="stat-foot">Total 30 jawaban per submission</span></article>
   <article class="stat-card"><span class="stat-label">Departemen</span><strong>{{ report.departments|length }}</strong><span class="stat-foot">Setelah filter diterapkan</span></article>
 </section>
