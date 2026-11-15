@@ -11,7 +11,9 @@ Aplikasi Flask untuk pengisian kuesioner stres kerja karyawan, klasifikasi enam 
 - Prediksi Naive Bayes per faktor jika model sudah dilatih; fallback aturan skor ditandai secara eksplisit.
 - Login admin, dashboard, riwayat, dan ekspor Excel.
 - Upload dataset CSV/Excel, training enam model CategoricalNB, holdout evaluation, confusion matrix, dan classification report.
-- Import terpisah untuk workbook skor agregat historis, dashboard statistik per faktor/departemen, filter batch/departemen, tabel detail, dan ekspor analisis Excel.
+- Upload dataset training juga mengimpor setiap responden sebagai submission, menyimpan 30 jawaban dan enam label target, lalu melatih enam model.
+- Halaman Analisis Submission membaca data dari tabel submissions dan factor_results, dengan filter sumber/batch/departemen, ringkasan enam faktor, distribusi kategori, tabel detail, dan ekspor Excel.
+- Label training, prediksi Naive Bayes, dan fallback aturan skor disimpan serta ditampilkan secara terpisah.
 - MySQL/MariaDB melalui PyMySQL.
 
 ## Teknologi
@@ -86,19 +88,27 @@ Tabel dibuat otomatis. Akun admin pertama dibuat dari `ADMIN_USERNAME` dan `ADMI
 
 Jika variabel admin diubah setelah akun sudah dibuat, password lama tidak otomatis diganti. Perubahan password perlu dilakukan melalui mekanisme pengelolaan akun yang aman atau pembaruan hash di database.
 
-## Import Skor Agregat Historis
+## Import Dataset dan Analisis Submission
 
-Menu **Import Skor** menerima workbook rekap enam skor faktor (header pada baris ke-4) seperti file Psikologi. Data disimpan terpisah pada tabel `aggregate_import_batches` dan `aggregate_factor_scores`.
+Menu **Training Model** menerima dataset per responden yang berisi 30 jawaban dan enam label target. Proses ini:
+1. Memvalidasi seluruh jawaban serta enam label.
+2. Mencatat batch impor (duplikat file identik ditolak).
+3. Membuat satu employee dan satu submission untuk setiap baris dataset.
+4. Menyimpan 30 jawaban di tabel `answers`.
+5. Menyimpan skor faktor dan target dataset di `factor_results.training_label`.
+6. Melatih enam model Categorical Naive Bayes dan menyimpan metrik evaluasi.
 
-Halaman ini menampilkan:
-- Ringkasan jumlah baris, ID unik, dan rata-rata total skor.
-- Rata-rata, minimum, dan maksimum skor masing-masing faktor.
-- Distribusi kategori yang dihitung dari aturan skor aplikasi (bukan label ground-truth atau prediksi Naive Bayes).
-- Perbandingan rata-rata skor per departemen.
-- Tabel detail responden dengan pagination.
-- Filter batch/departemen dan ekspor ringkasan/detail ke Excel.
+Kolom identitas pada template bersifat opsional: `employee_code`, `employee_name`, dan `department`. Jika tidak ada, aplikasi membuat nama generik `Responden 001`, dan seterusnya.
 
-Import ini menyimpan enam skor agregat sebagaimana ada di sumber. Ia tidak merekonstruksi jawaban 30 item dan tidak memasukkan data agregat ke training Naive Bayes item-level.
+Menu **Analisis Submission** membaca langsung data dari `submissions` dan `factor_results`, bukan meminta upload workbook terpisah. Halaman ini menyediakan:
+- Filter sumber (semua, dataset training, atau form karyawan), batch, dan departemen.
+- KPI jumlah submission, identitas responden, rata-rata total skor, dan jumlah departemen.
+- Rata-rata, minimum, dan maksimum enam faktor.
+- Distribusi kategori yang mengambil label dataset untuk submission impor, prediksi model untuk form dengan model, atau fallback aturan skor jika model belum tersedia.
+- Keterangan asal kategori agar label training tidak disalahartikan sebagai prediksi Naive Bayes.
+- Perbandingan departemen, tabel detail dengan pagination, dan ekspor Excel empat sheet.
+
+Tabel `aggregate_import_batches` dan `aggregate_factor_scores` dari versi impor lama tetap dipertahankan untuk menjaga data historis sebelumnya, tetapi dashboard baru berpusat pada tabel submission.
 
 ## Dataset Training
 
