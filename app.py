@@ -1075,7 +1075,10 @@ def build_submission_aggregate_report(factor_rows):
         })
 
     total_scores = [int(item["total_score"]) for item in submissions]
-    unique_employees = len({item["employee_name"] for item in submissions})
+    unique_employees = len({
+        str(item.get("employee_code") or item["employee_name"])
+        for item in submissions
+    })
     return {
         "factors": factor_summaries,
         "departments": department_summaries,
