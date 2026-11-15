@@ -967,7 +967,12 @@ def get_submission_factor_rows(source_filter="all", department=None, batch_id=No
                e.employee_name, e.employee_code, e.department,
                fr.factor_key, fr.factor_name, fr.factor_score,
                fr.rule_class, fr.training_label, fr.predicted_class, fr.model_version,
-               COALESCE(fr.training_label, fr.predicted_class, fr.rule_class) AS category_label
+               COALESCE(fr.training_label, fr.predicted_class, fr.rule_class) AS category_label,
+               CASE
+                   WHEN fr.training_label IS NOT NULL THEN 'Label dataset'
+                   WHEN fr.predicted_class IS NOT NULL THEN 'Prediksi Naive Bayes'
+                   ELSE 'Aturan skor (fallback)'
+               END AS category_basis
         FROM submissions s
         JOIN employees e ON e.id=s.employee_id
         JOIN factor_results fr ON fr.submission_id=s.id
@@ -998,10 +1003,18 @@ def build_submission_aggregate_report(factor_rows):
         subset = [row for row in factor_rows if row["factor_key"] == factor["key"]]
         scores = [int(row["factor_score"]) for row in subset]
         class_counts = {label: 0 for label in CLASSES}
+        basis_counts = {
+            "Label dataset": 0,
+            "Prediksi Naive Bayes": 0,
+            "Aturan skor (fallback)": 0,
+        }
         for row in subset:
             label = row.get("category_label") or "Tidak tersedia"
             if label in class_counts:
                 class_counts[label] += 1
+            basis = row.get("category_basis")
+            if basis in basis_counts:
+                basis_counts[basis] += 1
         factor_summaries.append({
             "key": factor["key"],
             "name": factor["name"],
@@ -1010,6 +1023,7 @@ def build_submission_aggregate_report(factor_rows):
             "minimum": min(scores) if scores else 0,
             "maximum": max(scores) if scores else 0,
             "counts": class_counts,
+            "basis_counts": basis_counts,
             "count": len(scores),
         })
 
