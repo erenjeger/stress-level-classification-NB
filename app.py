@@ -1112,8 +1112,6 @@ def import_aggregate():
 
     if source_filter == "form":
         batch_id = None
-    elif source_filter == "dataset" and not batch_id and batches:
-        batch_id = batches[0]["id"]
 
     factor_rows = get_submission_factor_rows(
         source_filter=source_filter,
