@@ -335,7 +335,7 @@ def predict_factor(factor: dict, answers: dict):
     model = load_model(factor)
     if model is None:
         # Fallback ini adalah aturan skor, bukan prediksi Naive Bayes.
-        return score, rule_class(score), rule_class(score), None, "Aturan skor (model belum tersedia)"
+        return score, rule_class(score), None, None, "Aturan skor (model belum tersedia)"
 
     features = np.array(
         [[answers[q] - 1 for q in factor["questions"]]],
@@ -453,7 +453,7 @@ def submit():
             "name": factor["name"],
             "score": score,
             "rule": rule,
-            "pred": predicted,
+            "pred": predicted or rule,
             "probs": probabilities,
             "version": version,
         }
@@ -875,7 +875,8 @@ def history(submission_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT e.employee_name, e.department, s.id, s.submitted_at, s.total_score
+                SELECT e.employee_name, e.employee_code, e.department, s.id,
+                       s.submitted_at, s.total_score, s.source_type, s.source_batch_id
                 FROM submissions s
                 JOIN employees e ON e.id=s.employee_id
                 WHERE s.id=%s
@@ -912,8 +913,8 @@ def export_excel():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT s.id AS submission_id, e.employee_name, e.department,
-                       s.submitted_at, s.total_score
+                SELECT s.id AS submission_id, e.employee_name, e.employee_code, e.department,
+                       s.submitted_at, s.total_score, s.source_type, s.source_batch_id
                 FROM submissions s
                 JOIN employees e ON e.id=s.employee_id
                 ORDER BY s.id
@@ -923,7 +924,7 @@ def export_excel():
             cur.execute(
                 """
                 SELECT submission_id, factor_name, factor_score, rule_class,
-                       predicted_class, probabilities, model_version
+                       training_label, predicted_class, probabilities, model_version
                 FROM factor_results ORDER BY submission_id, id
                 """
             )
@@ -970,7 +971,8 @@ def get_submission_factor_rows(source_filter="all", department=None, batch_id=No
                COALESCE(fr.training_label, fr.predicted_class, fr.rule_class) AS category_label,
                CASE
                    WHEN fr.training_label IS NOT NULL THEN 'Label dataset'
-                   WHEN fr.predicted_class IS NOT NULL THEN 'Prediksi Naive Bayes'
+                   WHEN fr.predicted_class IS NOT NULL
+                        AND fr.model_version = 'Categorical Naive Bayes' THEN 'Prediksi Naive Bayes'
                    ELSE 'Aturan skor (fallback)'
                END AS category_basis
         FROM submissions s
