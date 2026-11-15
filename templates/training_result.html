@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Hasil Training · StressCheck{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">TRAINING SELESAI</p><h1>Ringkasan hasil pelatihan</h1><p class="muted">Enam model telah dilatih dari dataset yang diunggah.</p></div><a class="button button-secondary" href="{{ url_for('confusion') }}">Lihat evaluasi →</a></section>
+<div class="panel section-panel">
+  <div class="table-wrap"><table><thead><tr><th>Faktor</th><th>Jumlah sampel</th><th>Akurasi holdout</th></tr></thead><tbody>
+  {% for item in summaries %}
+    <tr><td><strong>{{ item.factor }}</strong></td><td>{{ item.samples }}</td><td>{% if item.accuracy is not none %}{{ "%.2f"|format(item.accuracy) }}%{% else %}<span class="muted">Belum cukup data untuk evaluasi</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+</div>
+<div class="notice notice-info">Akurasi merupakan hasil pada data uji holdout, bukan akurasi pada seluruh data training. Periksa confusion matrix dan classification report sebelum menarik kesimpulan.</div>
+<a class="text-link" href="{{ url_for('training') }}">← Kembali ke training</a>
+{% endblock %}
