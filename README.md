@@ -11,6 +11,7 @@ Aplikasi Flask untuk pengisian kuesioner stres kerja karyawan, klasifikasi enam 
 - Prediksi Naive Bayes per faktor jika model sudah dilatih; fallback aturan skor ditandai secara eksplisit.
 - Login admin, dashboard, riwayat, dan ekspor Excel.
 - Upload dataset CSV/Excel, training enam model CategoricalNB, holdout evaluation, confusion matrix, dan classification report.
+- Import terpisah untuk workbook skor agregat historis, dashboard statistik per faktor/departemen, filter batch/departemen, tabel detail, dan ekspor analisis Excel.
 - MySQL/MariaDB melalui PyMySQL.
 
 ## Teknologi
@@ -84,6 +85,20 @@ Buka:
 Tabel dibuat otomatis. Akun admin pertama dibuat dari `ADMIN_USERNAME` dan `ADMIN_PASSWORD` saat aplikasi mulai, jika username tersebut belum ada.
 
 Jika variabel admin diubah setelah akun sudah dibuat, password lama tidak otomatis diganti. Perubahan password perlu dilakukan melalui mekanisme pengelolaan akun yang aman atau pembaruan hash di database.
+
+## Import Skor Agregat Historis
+
+Menu **Import Skor** menerima workbook rekap enam skor faktor (header pada baris ke-4) seperti file Psikologi. Data disimpan terpisah pada tabel `aggregate_import_batches` dan `aggregate_factor_scores`.
+
+Halaman ini menampilkan:
+- Ringkasan jumlah baris, ID unik, dan rata-rata total skor.
+- Rata-rata, minimum, dan maksimum skor masing-masing faktor.
+- Distribusi kategori yang dihitung dari aturan skor aplikasi (bukan label ground-truth atau prediksi Naive Bayes).
+- Perbandingan rata-rata skor per departemen.
+- Tabel detail responden dengan pagination.
+- Filter batch/departemen dan ekspor ringkasan/detail ke Excel.
+
+Import ini menyimpan enam skor agregat sebagaimana ada di sumber. Ia tidak merekonstruksi jawaban 30 item dan tidak memasukkan data agregat ke training Naive Bayes item-level.
 
 ## Dataset Training
 
