@@ -16,6 +16,7 @@
         {% if session.get('admin_id') %}
           <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
           <a href="{{ url_for('training') }}">Training Model</a>
+          <a href="{{ url_for('import_aggregate') }}">Import Skor</a>
           <a href="{{ url_for('confusion') }}">Evaluasi</a>
           <form method="post" action="{{ url_for('admin_logout') }}" class="inline-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
