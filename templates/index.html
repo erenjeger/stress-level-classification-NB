@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Kuesioner Stres Kerja · StressCheck{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">KUESIONER KARYAWAN</p>
+    <h1>Kenali faktor stres dalam pekerjaan Anda.</h1>
+    <p class="hero-copy">Lengkapi 30 pernyataan berikut berdasarkan pengalaman kerja Anda. Tidak ada jawaban benar atau salah.</p>
+  </div>
+  <div class="hero-stat"><strong>30</strong><span>Pernyataan</span><strong>6</strong><span>Faktor kerja</span></div>
+</section>
+
+<form method="post" action="{{ url_for('submit') }}" class="panel questionnaire">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="section-heading">
+    <div><p class="eyebrow">BAGIAN 01</p><h2>Informasi karyawan</h2></div>
+    <span class="muted small">Tidak perlu membuat akun</span>
+  </div>
+  <div class="form-grid">
+    <label class="field"><span>Nama karyawan <b class="required">*</b></span><input name="employee_name" maxlength="150" required placeholder="Masukkan nama"></label>
+    <label class="field"><span>Departemen</span><input name="department" maxlength="150" placeholder="Contoh: Operasional"></label>
+  </div>
+
+  <div class="section-heading question-heading">
+    <div><p class="eyebrow">BAGIAN 02</p><h2>Pernyataan kuesioner</h2></div>
+    <span class="muted small">Pilih satu jawaban per pernyataan</span>
+  </div>
+  <div class="scale-legend">
+    <span><b>1</b> Sangat Tidak Setuju</span>
+    <span><b>4</b> Netral</span>
+    <span><b>7</b> Sangat Setuju</span>
+  </div>
+
+  {% for question in questions %}
+    {% set qno = loop.index %}
+    <fieldset class="question-card">
+      <legend><span class="question-number">{{ "%02d"|format(qno) }}</span><span>{{ question }}</span></legend>
+      <div class="factor-hint">{{ question_factor[qno] }}</div>
+      <div class="rating-options">
+        {% for value in range(1, 8) %}
+          <label class="rating-option">
+            <input type="radio" name="q{{ qno }}" value="{{ value }}" required>
+            <span>{{ value }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+  {% endfor %}
+
+  <div class="form-footer">
+    <p class="muted small">Dengan mengirim formulir, Anda menyatakan bahwa jawaban telah diisi sesuai pengalaman Anda.</p>
+    <button class="button button-primary button-large" type="submit">Kirim jawaban <span aria-hidden="true">→</span></button>
+  </div>
+</form>
+{% endblock %}
