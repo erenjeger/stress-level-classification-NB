@@ -127,3 +127,5 @@ a:hover{color:var(--brand-dark)}
 .basis-caption span{padding:3px 7px;background:#f4f6fa;border-radius:6px}
 @media(max-width:900px){.aggregate-filter-wide{grid-template-columns:1fr 1fr}.aggregate-filter-wide .filter-actions{grid-column:1/-1}}
 @media(max-width:650px){.aggregate-filter-wide{grid-template-columns:1fr}.aggregate-filter-wide .filter-actions{grid-column:auto}}
+
+.page-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
