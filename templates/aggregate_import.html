@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Analisis Submission · StressCheck{% endblock %}
+{% block content %}
+<section class="page-heading aggregate-heading">
+  <div><p class="eyebrow">ANALYTICS · DATA SUBMISSION</p><h1>Analisis submission</h1><p class="muted">Statistik diambil langsung dari submission kuesioner dan hasil enam faktor yang tersimpan di database.</p></div>
+  <a class="button button-primary" href="{{ url_for('export_aggregate_excel', source=source_filter, department=department_filter, batch_id=batch_id) }}">↓ Ekspor analisis Excel</a>
+</section>
+
+<section class="panel aggregate-filter-panel">
+  <form method="get" action="{{ url_for('import_aggregate') }}" class="aggregate-filter-form aggregate-filter-wide">
+    <label class="field"><span>Sumber submission</span><select name="source">
+      <option value="all" {% if source_filter == 'all' %}selected{% endif %}>Semua sumber</option>
+      <option value="dataset" {% if source_filter == 'dataset' %}selected{% endif %}>Import dataset training</option>
+      <option value="form" {% if source_filter == 'form' %}selected{% endif %}>Form karyawan langsung</option>
+    </select></label>
+    <label class="field"><span>Batch training</span><select name="batch_id">
+      <option value="">Semua batch</option>
+      {% for batch in batches %}<option value="{{ batch.id }}" {% if batch_id == batch.id %}selected{% endif %}>#{{ batch.id }} · {{ batch.source_filename }} ({{ batch.total_records }})</option>{% endfor %}
+    </select></label>
+    <label class="field"><span>Departemen</span><select name="department">
+      <option value="">Semua departemen</option>
+      {% for department in departments %}<option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>{% endfor %}
+    </select></label>
+    <div class="filter-actions"><button class="button button-primary" type="submit">Terapkan</button><a class="button button-secondary" href="{{ url_for('import_aggregate') }}">Reset</a></div>
+  </form>
+  {% if selected_batch %}<div class="batch-meta"><span><strong>Batch:</strong> #{{ selected_batch.id }}</span><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Jumlah:</strong> {{ selected_batch.total_records }} responden</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span></div>{% endif %}
+</section>
+
+<div class="notice notice-info aggregate-note">
+  <strong>Interpretasi kategori:</strong>
+  {% if source_filter == 'dataset' %}
+    distribusi kategori berasal dari <code>training_label</code> yang diunggah bersama dataset.
+  {% elif source_filter == 'form' %}
+    distribusi kategori berasal dari <code>predicted_class</code> jika model tersedia; jika belum, aplikasi menggunakan fallback aturan skor.
+  {% else %}
+    hasil menggabungkan submission dataset (label target), form langsung (prediksi model), dan form yang belum menggunakan model (fallback aturan skor). Periksa sumber kategori pada setiap faktor.
+  {% endif %}
+  Label training tidak dianggap sebagai prediksi Naive Bayes.
+</div>
+
+{% if report.respondents %}
+<section class="aggregate-kpis">
+  <article class="stat-card"><span class="stat-label">Jumlah submission</span><strong>{{ report.respondents }}</strong><span class="stat-foot">Sesuai filter aktif</span></article>
+  <article class="stat-card"><span class="stat-label">Identitas responden unik</span><strong>{{ report.unique_employees }}</strong><span class="stat-foot">Bukan ID unik jika kode tidak disediakan</span></article>
+  <article class="stat-card"><span class="stat-label">Rata-rata total skor</span><strong>{{ report.average_total }}</strong><span class="stat-foot">Total 30 jawaban per submission</span></article>
+  <article class="stat-card"><span class="stat-label">Departemen</span><strong>{{ report.departments|length }}</strong><span class="stat-foot">Setelah filter diterapkan</span></article>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Skala matematis 5–35</span></div>
+  <div class="factor-average-list">{% for factor in report.factors %}
+    <div class="factor-average-item"><div class="factor-average-head"><strong>{{ factor.name }}</strong><span><b>{{ factor.average }}</b> / 35</span></div>
+      <div class="aggregate-track"><span style="width: {{ (factor.average / 35 * 100)|round(1) }}%"></span></div>
+      <div class="factor-range"><span>Minimum {{ factor.minimum }}</span><span>Maksimum {{ factor.maximum }}</span></div>
+    </div>
+  {% endfor %}</div>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">DISTRIBUSI KATEGORI</p><h2>Kategori per faktor</h2></div><span class="muted small">Sesuai sumber kategori di atas</span></div>
+  <div class="distribution-analysis">{% for factor in report.factors %}
+    <div class="distribution-analysis-item">
+      <div class="distribution-analysis-title"><strong>{{ factor.name }}</strong><span class="muted small">{{ factor.count }} hasil</span></div>
+      <div class="stacked-bar" role="img" aria-label="{{ factor.name }}: {{ factor.counts['Stres Ringan'] }} ringan, {{ factor.counts['Stres Sedang'] }} sedang, {{ factor.counts['Stres Berat'] }} berat">
+        {% if factor.count %}
+          {% if factor.counts['Stres Ringan'] %}<span class="stack-light" style="width: {{ (factor.counts['Stres Ringan'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+          {% if factor.counts['Stres Sedang'] %}<span class="stack-medium" style="width: {{ (factor.counts['Stres Sedang'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+          {% if factor.counts['Stres Berat'] %}<span class="stack-heavy" style="width: {{ (factor.counts['Stres Berat'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+        {% endif %}
+      </div>
+      <div class="distribution-legend"><span><i class="legend-dot dot-light"></i>Ringan <b>{{ factor.counts['Stres Ringan'] }}</b></span><span><i class="legend-dot dot-medium"></i>Sedang <b>{{ factor.counts['Stres Sedang'] }}</b></span><span><i class="legend-dot dot-heavy"></i>Berat <b>{{ factor.counts['Stres Berat'] }}</b></span></div>
+      <div class="basis-caption">
+        Sumber:
+        {% for basis, basis_count in factor.basis_counts.items() %}{% if basis_count %}<span>{{ basis }}: <strong>{{ basis_count }}</strong></span>{% endif %}{% endfor %}
+      </div>
+    </div>
+  {% endfor %}</div>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">PERBANDINGAN DEPARTEMEN</p><h2>Skor berdasarkan departemen</h2></div><span class="muted small">{{ report.departments|length }} departemen</span></div>
+  {% if report.departments %}<div class="table-wrap"><table><thead><tr><th>Departemen</th><th>Submission</th><th>Rata-rata total</th>{% for factor in report.factors %}<th>{{ factor.name }}</th>{% endfor %}</tr></thead><tbody>
+    {% for department in report.departments %}<tr><td><strong>{{ department.name }}</strong></td><td>{{ department.count }}</td><td>{{ department.average_total }}</td>{% for factor in report.factors %}<td>{{ department.averages[factor.key] }}</td>{% endfor %}</tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Belum ada data departemen pada filter ini.</div>{% endif %}
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">DETAIL RESPONDEN</p><h2>Data submission</h2></div><span class="muted small">Menampilkan {{ rows|length }} dari {{ total_filtered }} submission</span></div>
+  {% if rows %}<div class="table-wrap"><table class="aggregate-detail-table">
+    <thead><tr><th>Submission</th><th>Responden</th><th>Kode</th><th>Departemen</th><th>Sumber</th><th>Batch</th><th>Ketaksaan</th><th>Konflik</th><th>Beban Kuantitatif</th><th>Beban Kualitatif</th><th>Karir</th><th>Tanggung Jawab</th><th>Total</th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td>#{{ row.submission_id }}</td><td><strong>{{ row.employee_name }}</strong></td><td>{{ row.employee_code or '—' }}</td><td>{{ row.department or '—' }}</td><td>{{ row.source_type }}</td><td>{{ row.source_batch_id or '—' }}</td>
+      <td>{{ row.scores['ketaksaan_peran'] }}</td><td>{{ row.scores['konflik_peran'] }}</td><td>{{ row.scores['beban_kuantitatif'] }}</td><td>{{ row.scores['beban_kualitatif'] }}</td><td>{{ row.scores['pengembangan_karir'] }}</td><td>{{ row.scores['tanggung_jawab'] }}</td><td><strong>{{ row.total_score }}</strong></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="pagination"><span class="muted small">Halaman {{ page }} dari {{ total_pages }}</span><div>
+    {% if page > 1 %}<a class="button button-secondary" href="{{ url_for('import_aggregate', source=source_filter, batch_id=batch_id, department=department_filter, page=page-1) }}">← Sebelumnya</a>{% endif %}
+    {% if page < total_pages %}<a class="button button-secondary" href="{{ url_for('import_aggregate', source=source_filter, batch_id=batch_id, department=department_filter, page=page+1) }}">Berikutnya →</a>{% endif %}
+  </div></div>
+  {% else %}<div class="empty-state">Tidak ada submission sesuai filter.</div>{% endif %}
+</section>
+{% else %}
+<section class="panel section-panel"><div class="empty-state">Belum ada submission yang cocok. Import dataset dari halaman <a class="text-link" href="{{ url_for('training') }}">Training Model</a> atau isi kuesioner melalui halaman publik.</div></section>
+{% endif %}
+{% endblock %}

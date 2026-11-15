@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 import logging
 import math
 import os
@@ -117,14 +118,27 @@ def db_connection():
 
 
 def init_db():
-    """Buat tabel aplikasi. Database db_stres_karyawan harus sudah dibuat."""
+    """Create application tables and migrate existing installations safely."""
     statements = [
         """
         CREATE TABLE IF NOT EXISTS employees (
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             employee_name VARCHAR(150) NOT NULL,
+            employee_code VARCHAR(100) NULL,
             department VARCHAR(150) NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_employees_code (employee_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS dataset_import_batches (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            source_filename VARCHAR(255) NOT NULL,
+            source_sha256 CHAR(64) NOT NULL,
+            total_records INTEGER NOT NULL,
+            imported_by VARCHAR(80) NULL,
+            imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_dataset_sha256 (source_sha256)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -133,8 +147,13 @@ def init_db():
             employee_id BIGINT NOT NULL,
             submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             total_score INTEGER NOT NULL,
+            source_type VARCHAR(20) NOT NULL DEFAULT 'form',
+            source_batch_id BIGINT NULL,
+            INDEX idx_submissions_source (source_type, source_batch_id),
             CONSTRAINT fk_submissions_employee
-                FOREIGN KEY (employee_id) REFERENCES employees(id)
+                FOREIGN KEY (employee_id) REFERENCES employees(id),
+            CONSTRAINT fk_submissions_dataset_batch
+                FOREIGN KEY (source_batch_id) REFERENCES dataset_import_batches(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -157,7 +176,8 @@ def init_db():
             factor_name VARCHAR(120) NOT NULL,
             factor_score SMALLINT NOT NULL,
             rule_class VARCHAR(30) NOT NULL,
-            predicted_class VARCHAR(30) NOT NULL,
+            training_label VARCHAR(30) NULL,
+            predicted_class VARCHAR(30) NULL,
             probabilities JSON NULL,
             model_version VARCHAR(100) NULL,
             CONSTRAINT uq_submission_factor UNIQUE (submission_id, factor_key),
@@ -185,17 +205,70 @@ def init_db():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        # Legacy aggregate tables are retained so existing imported data is not deleted.
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_import_batches (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            source_filename VARCHAR(255) NOT NULL,
+            total_records INTEGER NOT NULL,
+            duplicate_code_rows INTEGER NOT NULL DEFAULT 0,
+            below_minimum_score_cells INTEGER NOT NULL DEFAULT 0,
+            imported_by VARCHAR(80) NULL,
+            imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_factor_scores (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            batch_id BIGINT NOT NULL,
+            source_no INTEGER NULL,
+            source_excel_row INTEGER NOT NULL,
+            employee_code VARCHAR(100) NOT NULL,
+            department VARCHAR(150) NULL,
+            ketaksaan_peran SMALLINT NOT NULL,
+            konflik_peran SMALLINT NOT NULL,
+            beban_kuantitatif SMALLINT NOT NULL,
+            beban_kualitatif SMALLINT NOT NULL,
+            pengembangan_karir SMALLINT NOT NULL,
+            tanggung_jawab SMALLINT NOT NULL,
+            total_score SMALLINT NOT NULL,
+            CONSTRAINT uq_aggregate_batch_row UNIQUE (batch_id, source_excel_row),
+            CONSTRAINT fk_aggregate_batch FOREIGN KEY (batch_id)
+                REFERENCES aggregate_import_batches(id) ON DELETE CASCADE,
+            INDEX idx_aggregate_employee_code (employee_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with db_connection() as conn:
         try:
             with conn.cursor() as cur:
                 for statement in statements:
                     cur.execute(statement)
+
+                # Migrate databases created by earlier application versions.
+                migrations = [
+                    ("employees", "employee_code", "ALTER TABLE employees ADD COLUMN employee_code VARCHAR(100) NULL"),
+                    ("submissions", "source_type", "ALTER TABLE submissions ADD COLUMN source_type VARCHAR(20) NOT NULL DEFAULT 'form'"),
+                    ("submissions", "source_batch_id", "ALTER TABLE submissions ADD COLUMN source_batch_id BIGINT NULL"),
+                    ("factor_results", "training_label", "ALTER TABLE factor_results ADD COLUMN training_label VARCHAR(30) NULL"),
+                ]
+                for table_name, column_name, alter_sql in migrations:
+                    cur.execute(f"SHOW COLUMNS FROM {table_name} LIKE %s", (column_name,))
+                    if not cur.fetchone():
+                        cur.execute(alter_sql)
+
+                # Imported training rows have a target label but no model prediction.
+                cur.execute("ALTER TABLE factor_results MODIFY predicted_class VARCHAR(30) NULL")
+
+                cur.execute("SHOW INDEX FROM submissions WHERE Key_name='idx_submissions_source'")
+                if not cur.fetchone():
+                    cur.execute(
+                        "ALTER TABLE submissions ADD INDEX idx_submissions_source (source_type, source_batch_id)"
+                    )
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-
 
 def ensure_admin_user():
     """Buat akun admin pertama dari environment variable bila belum ada."""
@@ -262,7 +335,7 @@ def predict_factor(factor: dict, answers: dict):
     model = load_model(factor)
     if model is None:
         # Fallback ini adalah aturan skor, bukan prediksi Naive Bayes.
-        return score, rule_class(score), rule_class(score), None, "Aturan skor (model belum tersedia)"
+        return score, rule_class(score), None, None, "Aturan skor (model belum tersedia)"
 
     features = np.array(
         [[answers[q] - 1 for q in factor["questions"]]],
@@ -380,7 +453,7 @@ def submit():
             "name": factor["name"],
             "score": score,
             "rule": rule,
-            "pred": predicted,
+            "pred": predicted or rule,
             "probs": probabilities,
             "version": version,
         }
@@ -455,10 +528,12 @@ def admin_dashboard():
             total = cur.fetchone()["total"]
             cur.execute(
                 """
-                SELECT factor_name, predicted_class, COUNT(*) AS jumlah
+                SELECT factor_name,
+                       COALESCE(training_label, predicted_class, rule_class) AS result_class,
+                       COUNT(*) AS jumlah
                 FROM factor_results
-                GROUP BY factor_name, predicted_class
-                ORDER BY factor_name, predicted_class
+                GROUP BY factor_name, result_class
+                ORDER BY factor_name, result_class
                 """
             )
             distribution = cur.fetchall()
@@ -490,7 +565,8 @@ def admin_dashboard():
 @app.route("/admin/training/template.csv")
 @admin_required
 def training_template():
-    headers = [f"answer_{number}" for number in range(1, 31)]
+    headers = ["employee_code", "employee_name", "department"]
+    headers += [f"answer_{number}" for number in range(1, 31)]
     headers += [factor["label"] for factor in FACTORS]
     output = io.StringIO()
     output.write(",".join(headers) + "\n")
@@ -507,11 +583,18 @@ def training_template():
 @admin_required
 def training():
     if request.method == "GET":
-        return render_template("training.html", factors=FACTORS, classes=CLASSES)
+        with db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, source_filename, total_records, imported_by, imported_at
+                    FROM dataset_import_batches ORDER BY id DESC LIMIT 10
+                """)
+                batches = cur.fetchall()
+        return render_template("training.html", factors=FACTORS, classes=CLASSES, batches=batches)
 
     uploaded = request.files.get("dataset")
     if not uploaded or not uploaded.filename:
-        flash("Pilih file dataset terlebih dahulu.", "danger")
+        flash("Pilih dataset CSV atau Excel terlebih dahulu.", "danger")
         return redirect(url_for("training"))
 
     original_name = secure_filename(uploaded.filename)
@@ -522,38 +605,57 @@ def training():
 
     saved_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{original_name}"
     uploaded.save(saved_path)
+    staged_models = []
 
     try:
+        source_digest = hashlib.sha256(saved_path.read_bytes()).hexdigest()
         if extension == ".csv":
-            dataframe = pd.read_csv(saved_path)
+            dataframe = pd.read_csv(saved_path, encoding="utf-8-sig")
         else:
             dataframe = pd.read_excel(saved_path)
 
-        required = [f"answer_{number}" for number in range(1, 31)]
-        required += [factor["label"] for factor in FACTORS]
+        dataframe.columns = [str(column).strip() for column in dataframe.columns]
+        answer_columns = [f"answer_{number}" for number in range(1, 31)]
+        label_columns = [factor["label"] for factor in FACTORS]
+        required = answer_columns + label_columns
         missing = [column for column in required if column not in dataframe.columns]
         if missing:
-            raise ValueError("Kolom belum lengkap: " + ", ".join(missing))
-
-        dataframe = dataframe[required].copy()
+            raise ValueError("Kolom wajib belum lengkap: " + ", ".join(missing))
         if dataframe.empty:
             raise ValueError("Dataset tidak memiliki baris data.")
 
-        for column in [f"answer_{number}" for number in range(1, 31)]:
+        optional_columns = [
+            column for column in ("employee_code", "employee_name", "department")
+            if column in dataframe.columns
+        ]
+        dataframe = dataframe[optional_columns + required].copy()
+
+        if dataframe[required].isna().any().any():
+            missing_columns = dataframe[required].columns[
+                dataframe[required].isna().any()
+            ].tolist()
+            raise ValueError(
+                "Ada nilai kosong pada kolom wajib: " + ", ".join(missing_columns)
+            )
+
+        for column in answer_columns:
             numeric = pd.to_numeric(dataframe[column], errors="coerce")
-            if numeric.isna().any():
-                raise ValueError(f"Kolom {column} berisi nilai kosong atau bukan angka.")
-            if not np.equal(numeric.to_numpy(), np.floor(numeric.to_numpy())).all():
+            if numeric.isna().any() or not np.equal(
+                numeric.to_numpy(), np.floor(numeric.to_numpy())
+            ).all():
                 raise ValueError(f"Kolom {column} harus berisi bilangan bulat.")
             dataframe[column] = numeric.astype(int)
             if not dataframe[column].between(1, 7).all():
-                raise ValueError(f"Nilai pada {column} harus berada pada rentang 1 sampai 7.")
+                raise ValueError(f"Nilai {column} harus berada pada rentang 1 sampai 7.")
 
-        if dataframe.isna().any().any():
-            raise ValueError("Dataset masih memiliki sel kosong. Lengkapi atau hapus baris kosong.")
+        for column in optional_columns:
+            if column in ("employee_code", "employee_name", "department"):
+                dataframe[column] = dataframe[column].apply(
+                    lambda value: None if pd.isna(value) or str(value).strip() == ""
+                    else str(value).strip()
+                )
 
-        trained_models = []
-        summaries = []
+        labels_by_factor = {}
         for factor in FACTORS:
             label_column = factor["label"]
             labels = dataframe[label_column].astype(str).str.strip()
@@ -564,8 +666,13 @@ def training():
                     f"Gunakan salah satu dari: {', '.join(CLASSES)}."
                 )
             if labels.nunique() < 2:
-                raise ValueError(f"{factor['name']}: minimal harus ada dua kelas label.")
+                raise ValueError(f"{factor['name']}: dataset harus memiliki minimal dua kelas.")
+            labels_by_factor[factor["key"]] = labels
 
+        # Prepare and evaluate six models before writing any submissions.
+        summaries = []
+        for factor in FACTORS:
+            labels = labels_by_factor[factor["key"]]
             feature_columns = [f"answer_{number}" for number in factor["questions"]]
             features = dataframe[feature_columns].to_numpy(dtype=int) - 1
             class_counts = labels.value_counts()
@@ -585,11 +692,7 @@ def training():
             )
             if can_evaluate:
                 x_train, x_test, y_train, y_test = train_test_split(
-                    features,
-                    labels,
-                    test_size=0.25,
-                    random_state=42,
-                    stratify=labels,
+                    features, labels, test_size=0.25, random_state=42, stratify=labels
                 )
                 evaluation_model = CategoricalNB(min_categories=7, alpha=1.0)
                 evaluation_model.fit(x_train, y_train)
@@ -597,37 +700,123 @@ def training():
                 accuracy = float(accuracy_score(y_test, predicted_test))
                 matrix = confusion_matrix(y_test, predicted_test, labels=CLASSES).tolist()
                 report = classification_report(
-                    y_test,
-                    predicted_test,
-                    labels=CLASSES,
-                    target_names=CLASSES,
-                    output_dict=True,
-                    zero_division=0,
+                    y_test, predicted_test, labels=CLASSES, target_names=CLASSES,
+                    output_dict=True, zero_division=0,
                 )
 
             final_model = CategoricalNB(min_categories=7, alpha=1.0)
             final_model.fit(features, labels)
             final_path = model_path(factor)
-            temporary_path = final_path.with_suffix(".joblib.tmp")
+            temporary_path = MODEL_DIR / f"{factor['key']}.{uuid.uuid4().hex}.joblib.tmp"
             joblib.dump(final_model, temporary_path)
-            trained_models.append((factor, temporary_path, final_path, accuracy, matrix, report, len(dataframe)))
-            summaries.append(
-                {
-                    "factor": factor["name"],
-                    "samples": len(dataframe),
-                    "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
-                    "confusion": matrix,
-                }
-            )
+            staged_models.append({
+                "factor": factor,
+                "temporary_path": temporary_path,
+                "final_path": final_path,
+                "accuracy": accuracy,
+                "matrix": matrix,
+                "report": report,
+                "sample_count": len(dataframe),
+            })
+            summaries.append({
+                "factor": factor["name"],
+                "samples": len(dataframe),
+                "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
+                "confusion": matrix,
+            })
 
-        # Ganti file model setelah seluruh model berhasil dilatih.
-        for _factor, temporary_path, final_path, *_rest in trained_models:
-            os.replace(temporary_path, final_path)
-
+        # Persist batch, respondents, answers, six target labels and metrics atomically.
         with db_connection() as conn:
             try:
                 with conn.cursor() as cur:
-                    for factor, _tmp, final_path, accuracy, matrix, report, sample_count in trained_models:
+                    cur.execute(
+                        "SELECT id FROM dataset_import_batches WHERE source_sha256=%s",
+                        (source_digest,),
+                    )
+                    if cur.fetchone():
+                        raise ValueError(
+                            "File dataset yang sama sudah pernah diimpor. "
+                            "Periksa riwayat training untuk menghindari submission duplikat."
+                        )
+
+                    cur.execute("""
+                        INSERT INTO dataset_import_batches
+                        (source_filename, source_sha256, total_records, imported_by)
+                        VALUES(%s, %s, %s, %s)
+                    """, (
+                        original_name, len(dataframe), source_digest,
+                        session.get("admin_username"),
+                    ))
+                    batch_id = cur.lastrowid
+
+                    for row_index, row in dataframe.reset_index(drop=True).iterrows():
+                        employee_name = (
+                            row.get("employee_name")
+                            or f"Responden {row_index + 1:03d}"
+                        )
+                        employee_code = row.get("employee_code")
+                        department = row.get("department")
+
+                        cur.execute(
+                            """
+                            INSERT INTO employees(employee_name, employee_code, department)
+                            VALUES(%s, %s, %s)
+                            """,
+                            (employee_name, employee_code, department),
+                        )
+                        employee_id = cur.lastrowid
+                        answers = {
+                            number: int(row[f"answer_{number}"])
+                            for number in range(1, 31)
+                        }
+                        cur.execute(
+                            """
+                            INSERT INTO submissions
+                            (employee_id, total_score, source_type, source_batch_id)
+                            VALUES(%s, %s, 'dataset', %s)
+                            """,
+                            (employee_id, sum(answers.values()), batch_id),
+                        )
+                        submission_id = cur.lastrowid
+
+                        cur.executemany(
+                            """
+                            INSERT INTO answers(submission_id, question_no, answer)
+                            VALUES(%s, %s, %s)
+                            """,
+                            [
+                                (submission_id, question_no, answers[question_no])
+                                for question_no in range(1, 31)
+                            ],
+                        )
+
+                        factor_result_rows = []
+                        for factor in FACTORS:
+                            factor_score = sum(answers[q] for q in factor["questions"])
+                            training_label = labels_by_factor[factor["key"]].iloc[row_index]
+                            factor_result_rows.append((
+                                submission_id,
+                                factor["key"],
+                                factor["name"],
+                                factor_score,
+                                rule_class(factor_score),
+                                training_label,
+                                None,   # Imported training rows have a target label, not a prediction.
+                                None,
+                                "Label dataset (belum merupakan prediksi model)",
+                            ))
+                        cur.executemany(
+                            """
+                            INSERT INTO factor_results
+                            (submission_id, factor_key, factor_name, factor_score,
+                             rule_class, training_label, predicted_class, probabilities, model_version)
+                            VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            factor_result_rows,
+                        )
+
+                    for item in staged_models:
+                        factor = item["factor"]
                         cur.execute(
                             """
                             INSERT INTO model_metrics
@@ -636,11 +825,11 @@ def training():
                             """,
                             (
                                 factor["key"],
-                                sample_count,
-                                accuracy,
-                                json.dumps(matrix) if matrix is not None else None,
-                                json.dumps(report, ensure_ascii=False),
-                                str(final_path.relative_to(BASE_DIR)),
+                                item["sample_count"],
+                                item["accuracy"],
+                                json.dumps(item["matrix"]) if item["matrix"] is not None else None,
+                                json.dumps(item["report"], ensure_ascii=False),
+                                str(item["final_path"].relative_to(BASE_DIR)),
                             ),
                         )
                 conn.commit()
@@ -648,17 +837,33 @@ def training():
                 conn.rollback()
                 raise
 
+        # Publish the model artifacts only after the database transaction succeeds.
+        for item in staged_models:
+            os.replace(item["temporary_path"], item["final_path"])
+
         flash(
-            f"Training berhasil: {len(dataframe)} baris data diproses untuk enam faktor.",
+            f"Berhasil mengimpor {len(dataframe)} responden sebagai submission batch #{batch_id} "
+            "dan melatih enam model Naive Bayes.",
             "success",
         )
-        return render_template("training_result.html", summaries=summaries, classes=CLASSES)
+        return render_template(
+            "training_result.html",
+            summaries=summaries,
+            classes=CLASSES,
+            imported_count=len(dataframe),
+            batch_id=batch_id,
+        )
 
     except Exception as error:
-        logger.exception("Training dataset gagal.")
-        flash(f"Training gagal: {error}", "danger")
+        logger.exception("Import dataset/training gagal.")
+        flash(f"Import dan training gagal: {error}", "danger")
         return redirect(url_for("training"))
     finally:
+        for item in staged_models:
+            try:
+                item["temporary_path"].unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Tidak dapat menghapus model sementara: %s", item["temporary_path"])
         try:
             saved_path.unlink(missing_ok=True)
         except OSError:
@@ -672,7 +877,8 @@ def history(submission_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT e.employee_name, e.department, s.id, s.submitted_at, s.total_score
+                SELECT e.employee_name, e.employee_code, e.department, s.id,
+                       s.submitted_at, s.total_score, s.source_type, s.source_batch_id
                 FROM submissions s
                 JOIN employees e ON e.id=s.employee_id
                 WHERE s.id=%s
@@ -709,8 +915,8 @@ def export_excel():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT s.id AS submission_id, e.employee_name, e.department,
-                       s.submitted_at, s.total_score
+                SELECT s.id AS submission_id, e.employee_name, e.employee_code, e.department,
+                       s.submitted_at, s.total_score, s.source_type, s.source_batch_id
                 FROM submissions s
                 JOIN employees e ON e.id=s.employee_id
                 ORDER BY s.id
@@ -720,7 +926,7 @@ def export_excel():
             cur.execute(
                 """
                 SELECT submission_id, factor_name, factor_score, rule_class,
-                       predicted_class, probabilities, model_version
+                       training_label, predicted_class, probabilities, model_version
                 FROM factor_results ORDER BY submission_id, id
                 """
             )
@@ -743,6 +949,278 @@ def export_excel():
         buffer,
         as_attachment=True,
         download_name="data_stres_karyawan.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+AGGREGATE_FACTOR_FIELDS = [
+    {"key": "ketaksaan_peran", "name": "Ketaksaan Peran", "column": "ketaksaan_peran"},
+    {"key": "konflik_peran", "name": "Konflik Peran", "column": "konflik_peran"},
+    {"key": "beban_kuantitatif", "name": "Beban Berlebih Kuantitatif", "column": "beban_kuantitatif"},
+    {"key": "beban_kualitatif", "name": "Beban Berlebih Kualitatif", "column": "beban_kualitatif"},
+    {"key": "pengembangan_karir", "name": "Pengembangan Karir", "column": "pengembangan_karir"},
+    {"key": "tanggung_jawab", "name": "Tanggung Jawab terhadap Orang Lain", "column": "tanggung_jawab"},
+]
+
+
+def get_submission_factor_rows(source_filter="all", department=None, batch_id=None):
+    query = """
+        SELECT s.id AS submission_id, s.submitted_at, s.total_score,
+               s.source_type, s.source_batch_id,
+               e.employee_name, e.employee_code, e.department,
+               fr.factor_key, fr.factor_name, fr.factor_score,
+               fr.rule_class, fr.training_label, fr.predicted_class, fr.model_version,
+               COALESCE(fr.training_label, fr.predicted_class, fr.rule_class) AS category_label,
+               CASE
+                   WHEN fr.training_label IS NOT NULL THEN 'Label dataset'
+                   WHEN fr.predicted_class IS NOT NULL
+                        AND fr.model_version LIKE '%Naive Bayes%' THEN 'Prediksi Naive Bayes'
+                   ELSE 'Aturan skor (fallback)'
+               END AS category_basis
+        FROM submissions s
+        JOIN employees e ON e.id=s.employee_id
+        JOIN factor_results fr ON fr.submission_id=s.id
+        WHERE 1=1
+    """
+    params = []
+    if source_filter in ("dataset", "form"):
+        query += " AND s.source_type=%s"
+        params.append(source_filter)
+    if department:
+        query += " AND e.department=%s"
+        params.append(department)
+    if batch_id:
+        query += " AND s.source_batch_id=%s"
+        params.append(batch_id)
+    query += " ORDER BY s.id DESC, fr.factor_key"
+
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+
+def build_submission_aggregate_report(factor_rows):
+    grouped_submissions = {}
+    factor_summaries = []
+    for factor in AGGREGATE_FACTOR_FIELDS:
+        subset = [row for row in factor_rows if row["factor_key"] == factor["key"]]
+        scores = [int(row["factor_score"]) for row in subset]
+        class_counts = {label: 0 for label in CLASSES}
+        basis_counts = {
+            "Label dataset": 0,
+            "Prediksi Naive Bayes": 0,
+            "Aturan skor (fallback)": 0,
+        }
+        for row in subset:
+            label = row.get("category_label") or "Tidak tersedia"
+            if label in class_counts:
+                class_counts[label] += 1
+            basis = row.get("category_basis")
+            if basis in basis_counts:
+                basis_counts[basis] += 1
+        factor_summaries.append({
+            "key": factor["key"],
+            "name": factor["name"],
+            "column": factor["column"],
+            "average": round(sum(scores) / len(scores), 2) if scores else 0,
+            "minimum": min(scores) if scores else 0,
+            "maximum": max(scores) if scores else 0,
+            "counts": class_counts,
+            "basis_counts": basis_counts,
+            "count": len(scores),
+        })
+
+    for row in factor_rows:
+        submission_id = row["submission_id"]
+        if submission_id not in grouped_submissions:
+            grouped_submissions[submission_id] = {
+                "submission_id": submission_id,
+                "employee_name": row["employee_name"],
+                "employee_code": row.get("employee_code"),
+                "department": row.get("department"),
+                "submitted_at": row["submitted_at"],
+                "total_score": row["total_score"],
+                "source_type": row["source_type"],
+                "source_batch_id": row.get("source_batch_id"),
+                "scores": {},
+                "categories": {},
+            }
+        grouped_submissions[submission_id]["scores"][row["factor_key"]] = row["factor_score"]
+        grouped_submissions[submission_id]["categories"][row["factor_key"]] = row.get("category_label")
+
+    submissions = list(grouped_submissions.values())
+    by_department = {}
+    for item in submissions:
+        department_name = (item.get("department") or "Tidak diisi").strip() or "Tidak diisi"
+        by_department.setdefault(department_name, []).append(item)
+
+    department_summaries = []
+    for name, department_submissions in sorted(by_department.items(), key=lambda pair: pair[0].lower()):
+        department_summaries.append({
+            "name": name,
+            "count": len(department_submissions),
+            "average_total": round(
+                sum(int(item["total_score"]) for item in department_submissions)
+                / len(department_submissions), 2
+            ),
+            "averages": {
+                factor["key"]: round(
+                    sum(int(item["scores"].get(factor["key"]) or 0)
+                        for item in department_submissions)
+                    / len(department_submissions), 2
+                )
+                for factor in AGGREGATE_FACTOR_FIELDS
+            },
+        })
+
+    total_scores = [int(item["total_score"]) for item in submissions]
+    unique_employees = len({
+        str(item.get("employee_code") or item["employee_name"])
+        for item in submissions
+    })
+    return {
+        "factors": factor_summaries,
+        "departments": department_summaries,
+        "respondents": len(submissions),
+        "unique_employees": unique_employees,
+        "average_total": round(sum(total_scores) / len(total_scores), 2) if total_scores else 0,
+    }, submissions
+
+
+@app.route("/admin/import-aggregate")
+@admin_required
+def import_aggregate():
+    """Dashboard statistik berdasarkan submissions dan factor_results."""
+    source_filter = request.args.get("source", "all").strip().lower()
+    if source_filter not in ("all", "dataset", "form"):
+        source_filter = "all"
+    department_filter = request.args.get("department", "").strip()
+    batch_id = request.args.get("batch_id", type=int)
+
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT e.department
+                FROM submissions s JOIN employees e ON e.id=s.employee_id
+                WHERE e.department IS NOT NULL AND e.department <> ''
+                ORDER BY e.department
+            """)
+            departments = [row["department"] for row in cur.fetchall()]
+            cur.execute("""
+                SELECT id, source_filename, total_records, imported_by, imported_at
+                FROM dataset_import_batches ORDER BY id DESC LIMIT 50
+            """)
+            batches = cur.fetchall()
+
+    if source_filter == "form":
+        batch_id = None
+
+    factor_rows = get_submission_factor_rows(
+        source_filter=source_filter,
+        department=department_filter or None,
+        batch_id=batch_id,
+    )
+    report, submission_rows = build_submission_aggregate_report(factor_rows)
+
+    page_size = 25
+    total_filtered = len(submission_rows)
+    total_pages = max(1, math.ceil(total_filtered / page_size))
+    page_number = request.args.get("page", default=1, type=int) or 1
+    page_number = min(max(page_number, 1), total_pages)
+    offset = (page_number - 1) * page_size
+    page_rows = submission_rows[offset:offset + page_size]
+
+    selected_batch = next((item for item in batches if item["id"] == batch_id), None)
+    return render_template(
+        "aggregate_import.html",
+        batches=batches,
+        selected_batch=selected_batch,
+        source_filter=source_filter,
+        batch_id=batch_id,
+        departments=departments,
+        department_filter=department_filter,
+        report=report,
+        rows=page_rows,
+        page=page_number,
+        total_pages=total_pages,
+        total_filtered=total_filtered,
+    )
+
+
+@app.route("/admin/import-aggregate/export.xlsx")
+@admin_required
+def export_aggregate_excel():
+    source_filter = request.args.get("source", "all").strip().lower()
+    if source_filter not in ("all", "dataset", "form"):
+        source_filter = "all"
+    department = request.args.get("department", "").strip()
+    batch_id = request.args.get("batch_id", type=int)
+    factor_rows = get_submission_factor_rows(
+        source_filter=source_filter,
+        department=department or None,
+        batch_id=batch_id,
+    )
+    report, submissions = build_submission_aggregate_report(factor_rows)
+
+    detail_records = []
+    for item in submissions:
+        record = {
+            "Submission ID": item["submission_id"],
+            "Nama/identitas responden": item["employee_name"],
+            "Kode karyawan": item.get("employee_code"),
+            "Departemen": item.get("department"),
+            "Sumber data": item["source_type"],
+            "Batch import": item.get("source_batch_id"),
+            "Waktu pengisian": item["submitted_at"],
+            "Total 30 jawaban": item["total_score"],
+        }
+        for factor in AGGREGATE_FACTOR_FIELDS:
+            record[f"Skor {factor['name']}"] = item["scores"].get(factor["key"])
+            record[f"Kategori {factor['name']}"] = item["categories"].get(factor["key"])
+        detail_records.append(record)
+
+    summary = pd.DataFrame([
+        {
+            "Faktor": item["name"],
+            "Rata-rata skor": item["average"],
+            "Skor minimum": item["minimum"],
+            "Skor maksimum": item["maximum"],
+            "Jumlah submission": item["count"],
+        }
+        for item in report["factors"]
+    ])
+    distribution = pd.DataFrame([
+        {
+            "Faktor": item["name"],
+            "Ringan": item["counts"][CLASSES[0]],
+            "Sedang": item["counts"][CLASSES[1]],
+            "Berat": item["counts"][CLASSES[2]],
+        }
+        for item in report["factors"]
+    ])
+    department_rows = []
+    for item in report["departments"]:
+        record = {
+            "Departemen": item["name"],
+            "Jumlah submission": item["count"],
+            "Rata-rata total": item["average_total"],
+        }
+        for factor in AGGREGATE_FACTOR_FIELDS:
+            record[f"Rata-rata {factor['name']}"] = item["averages"][factor["key"]]
+        department_rows.append(record)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        summary.to_excel(writer, index=False, sheet_name="Ringkasan")
+        distribution.to_excel(writer, index=False, sheet_name="Distribusi")
+        pd.DataFrame(department_rows).to_excel(writer, index=False, sheet_name="Per Departemen")
+        pd.DataFrame(detail_records).to_excel(writer, index=False, sheet_name="Detail Submission")
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="analisis_submission_stres_karyawan.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
