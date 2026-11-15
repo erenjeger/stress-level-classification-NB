@@ -185,6 +185,38 @@ def init_db():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_import_batches (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            source_filename VARCHAR(255) NOT NULL,
+            total_records INTEGER NOT NULL,
+            duplicate_code_rows INTEGER NOT NULL DEFAULT 0,
+            below_minimum_score_cells INTEGER NOT NULL DEFAULT 0,
+            imported_by VARCHAR(80) NULL,
+            imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_factor_scores (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            batch_id BIGINT NOT NULL,
+            source_no INTEGER NULL,
+            source_excel_row INTEGER NOT NULL,
+            employee_code VARCHAR(100) NOT NULL,
+            department VARCHAR(150) NULL,
+            ketaksaan_peran SMALLINT NOT NULL,
+            konflik_peran SMALLINT NOT NULL,
+            beban_kuantitatif SMALLINT NOT NULL,
+            beban_kualitatif SMALLINT NOT NULL,
+            pengembangan_karir SMALLINT NOT NULL,
+            tanggung_jawab SMALLINT NOT NULL,
+            total_score SMALLINT NOT NULL,
+            CONSTRAINT uq_aggregate_batch_row UNIQUE (batch_id, source_excel_row),
+            CONSTRAINT fk_aggregate_batch FOREIGN KEY (batch_id)
+                REFERENCES aggregate_import_batches(id) ON DELETE CASCADE,
+            INDEX idx_aggregate_employee_code (employee_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with db_connection() as conn:
         try:
@@ -745,6 +777,199 @@ def export_excel():
         download_name="data_stres_karyawan.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+@app.route("/admin/import-aggregate", methods=["GET", "POST"])
+@admin_required
+def import_aggregate():
+    """Impor workbook skor agregat historis; data ini bukan data training item-level."""
+    if request.method == "GET":
+        with db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, source_filename, total_records, duplicate_code_rows,
+                           below_minimum_score_cells, imported_by, imported_at
+                    FROM aggregate_import_batches
+                    ORDER BY id DESC LIMIT 20
+                    """
+                )
+                batches = cur.fetchall()
+        return render_template("aggregate_import.html", batches=batches)
+
+    uploaded = request.files.get("dataset")
+    if not uploaded or not uploaded.filename:
+        flash("Pilih file Excel terlebih dahulu.", "danger")
+        return redirect(url_for("import_aggregate"))
+
+    original_name = secure_filename(uploaded.filename)
+    extension = Path(original_name).suffix.lower()
+    if extension not in {".xlsx", ".xls"}:
+        flash("Impor skor agregat saat ini menerima file Excel .xlsx atau .xls.", "danger")
+        return redirect(url_for("import_aggregate"))
+
+    saved_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{original_name}"
+    uploaded.save(saved_path)
+
+    try:
+        # File Psikologi 1.xlsx menempatkan header pada baris ke-4 (header=3).
+        dataframe = pd.read_excel(saved_path, header=3)
+        dataframe.columns = [str(column).strip() for column in dataframe.columns]
+
+        required = [
+            "No", "ID NUMBER", "BAGIAN",
+            "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain",
+            "Total",
+        ]
+        missing = [column for column in required if column not in dataframe.columns]
+        if missing:
+            raise ValueError(
+                "Kolom tidak sesuai dengan workbook Psikologi. Kolom yang belum ditemukan: "
+                + ", ".join(missing)
+            )
+
+        dataframe = dataframe[required].dropna(
+            subset=["ID NUMBER", "Ketaksan Peran", "Konflik Peran",
+                    "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+                    "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain", "Total"]
+        ).copy()
+        if dataframe.empty:
+            raise ValueError("Tidak ada baris data yang dapat diimpor.")
+
+        numeric_columns = [
+            "No", "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain", "Total",
+        ]
+        for column in numeric_columns:
+            numeric = pd.to_numeric(dataframe[column], errors="coerce")
+            if numeric.isna().any() or not np.equal(
+                numeric.to_numpy(), np.floor(numeric.to_numpy())
+            ).all():
+                raise ValueError(f"Kolom {column} harus berisi bilangan bulat dan tidak kosong.")
+            dataframe[column] = numeric.astype(int)
+
+        score_columns = [
+            "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain",
+        ]
+        for column in score_columns:
+            if not dataframe[column].between(0, 35).all():
+                raise ValueError(f"Skor {column} harus berada pada rentang 0 sampai 35.")
+
+        calculated_total = dataframe[score_columns].sum(axis=1)
+        mismatch_count = int((calculated_total != dataframe["Total"]).sum())
+        if mismatch_count:
+            raise ValueError(
+                f"Ada {mismatch_count} baris dengan Total yang tidak sama dengan jumlah enam skor. "
+                "Perbaiki workbook sebelum impor."
+            )
+
+        def normalize_employee_code(value):
+            if pd.isna(value):
+                return ""
+            if isinstance(value, (int, np.integer)):
+                return str(int(value))
+            if isinstance(value, (float, np.floating)) and float(value).is_integer():
+                return str(int(value))
+            return str(value).strip()
+
+        dataframe["employee_code_normalized"] = dataframe["ID NUMBER"].apply(
+            normalize_employee_code
+        )
+        if (dataframe["employee_code_normalized"] == "").any():
+            raise ValueError("Terdapat ID NUMBER kosong.")
+        duplicate_code_rows = int(
+            dataframe["employee_code_normalized"].duplicated(keep=False).sum()
+        )
+        below_minimum_score_cells = int(
+            (dataframe[score_columns] < 5).sum().sum()
+        )
+
+        records = []
+        for dataframe_index, row in dataframe.iterrows():
+            excel_row = int(dataframe_index) + 5
+            source_no = int(row["No"]) if pd.notna(row["No"]) else None
+            department = None if pd.isna(row["BAGIAN"]) else str(row["BAGIAN"]).strip()
+            records.append((
+                excel_row,
+                source_no,
+                row["employee_code_normalized"],
+                department or None,
+                int(row["Ketaksan Peran"]),
+                int(row["Konflik Peran"]),
+                int(row["Beban Berlebih Kuantitatif"]),
+                int(row["Beban Berlebih Kualitatif"]),
+                int(row["Pengembangan Karir"]),
+                int(row["Tanggung Jawab Kepada Orang Lain"]),
+                int(row["Total"]),
+            ))
+
+        with db_connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO aggregate_import_batches
+                        (source_filename, total_records, duplicate_code_rows,
+                         below_minimum_score_cells, imported_by)
+                        VALUES(%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            original_name, len(records), duplicate_code_rows,
+                            below_minimum_score_cells, session.get("admin_username"),
+                        ),
+                    )
+                    batch_id = cur.lastrowid
+                    cur.executemany(
+                        """
+                        INSERT INTO aggregate_factor_scores
+                        (batch_id, source_excel_row, source_no, employee_code, department,
+                         ketaksaan_peran, konflik_peran, beban_kuantitatif,
+                         beban_kualitatif, pengembangan_karir, tanggung_jawab, total_score)
+                        VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        [
+                            (batch_id, excel_row, source_no, employee_code, department,
+                             ketaksaan, konflik, beban_kuantitatif, beban_kualitatif,
+                             karir, tanggung_jawab, total)
+                            for (excel_row, source_no, employee_code, department,
+                                 ketaksaan, konflik, beban_kuantitatif, beban_kualitatif,
+                                 karir, tanggung_jawab, total) in records
+                        ],
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        message = f"Berhasil mengimpor {len(records)} baris skor agregat ke batch #{batch_id}."
+        flash(message, "success")
+        if duplicate_code_rows:
+            flash(
+                f"Perhatian: {duplicate_code_rows} baris memiliki ID NUMBER yang duplikat. "
+                "Semua baris tetap disimpan dan tidak digabung otomatis.",
+                "warning",
+            )
+        if below_minimum_score_cells:
+            flash(
+                f"Perhatian: ditemukan {below_minimum_score_cells} nilai skor di bawah 5. "
+                "Nilai asli dipertahankan; verifikasi terhadap sumber kuesioner.",
+                "warning",
+            )
+        return redirect(url_for("import_aggregate"))
+    except Exception as error:
+        logger.exception("Impor skor agregat gagal.")
+        flash(f"Impor gagal: {error}", "danger")
+        return redirect(url_for("import_aggregate"))
+    finally:
+        try:
+            saved_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Tidak dapat menghapus file upload sementara: %s", saved_path)
 
 
 @app.route("/admin/confusion")
