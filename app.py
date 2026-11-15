@@ -744,7 +744,7 @@ def training():
                         (source_filename, source_sha256, total_records, imported_by)
                         VALUES(%s, %s, %s, %s)
                     """, (
-                        original_name, len(dataframe), source_digest,
+                        original_name, source_digest, len(dataframe),
                         session.get("admin_username"),
                     ))
                     batch_id = cur.lastrowid
