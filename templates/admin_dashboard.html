@@ -3,7 +3,7 @@
 {% block content %}
 <section class="page-heading">
   <div><p class="eyebrow">OVERVIEW</p><h1>Dashboard admin</h1><p class="muted">Pantau pengisian kuesioner, distribusi klasifikasi, dan status model.</p></div>
-  <a class="button button-primary" href="{{ url_for('export_excel') }}">↓ Ekspor Excel</a>
+  <div class="page-actions"><a class="button button-secondary" href="{{ url_for('import_aggregate') }}">Analisis Submission</a><a class="button button-primary" href="{{ url_for('export_excel') }}">↓ Ekspor Excel</a></div>
 </section>
 
 <div class="stats-grid">
@@ -17,7 +17,7 @@
   {% if distribution %}
     <div class="distribution-list">
       {% for item in distribution %}
-        <div class="distribution-row"><div><strong>{{ item.factor_name }}</strong><span class="muted">{{ item.predicted_class }}</span></div><span class="count-badge">{{ item.jumlah }}</span></div>
+        <div class="distribution-row"><div><strong>{{ item.factor_name }}</strong><span class="muted">{{ item.result_class }}</span></div><span class="count-badge">{{ item.jumlah }}</span></div>
       {% endfor %}
     </div>
   {% else %}
