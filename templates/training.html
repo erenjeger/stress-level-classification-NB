@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Training Model · StressCheck{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">MACHINE LEARNING</p><h1>Training Naive Bayes</h1><p class="muted">Unggah dataset berlabel untuk melatih enam model Categorical Naive Bayes.</p></div></section>
+
+<div class="notice notice-warning"><strong>Perhatian metodologis.</strong> Gunakan label kelas yang berasal dari ground-truth/instrumen penelitian yang dapat dipertanggungjawabkan. Jika label dibuat dari ambang skor yang sama, model pada dasarnya belajar meniru aturan tersebut.</div>
+
+<section class="panel section-panel">
+  <div class="section-heading"><div><p class="eyebrow">LANGKAH 01</p><h2>Siapkan dataset</h2></div><a class="button button-secondary" href="{{ url_for('training_template') }}">↓ Template CSV</a></div>
+  <p class="muted">File harus berisi 30 kolom jawaban dan enam kolom label. Setiap baris mewakili satu responden.</p>
+  <div class="table-wrap"><table><thead><tr><th>Jenis kolom</th><th>Nama kolom</th><th>Ketentuan</th></tr></thead><tbody>
+    <tr><td>Jawaban</td><td><code>answer_1</code> – <code>answer_30</code></td><td>Bilangan bulat 1–7</td></tr>
+    {% for factor in factors %}<tr><td>Label</td><td><code>{{ factor.label }}</code></td><td>Salah satu dari tiga kelas stres</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="panel section-panel">
+  <div class="section-heading"><div><p class="eyebrow">LANGKAH 02</p><h2>Unggah dan latih model</h2></div></div>
+  <form method="post" enctype="multipart/form-data" class="upload-zone">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="file-picker"><span class="file-icon">↑</span><strong>Pilih file dataset</strong><span class="muted small">Format .xlsx, .xls, atau .csv · Maksimal 10 MB</span><input type="file" name="dataset" accept=".xlsx,.xls,.csv" required></label>
+    <button class="button button-primary button-large" type="submit">Mulai training enam model</button>
+  </form>
+</section>
+
+<section class="panel section-panel">
+  <div class="section-heading"><div><p class="eyebrow">OUTPUT</p><h2>Faktor yang akan dilatih</h2></div></div>
+  <div class="factor-grid">{% for factor in factors %}<div class="factor-chip"><span>0{{ loop.index }}</span>{{ factor.name }}</div>{% endfor %}</div>
+  <p class="small muted">Evaluasi holdout stratified akan dihitung bila jumlah sampel dan distribusi kelas mencukupi. Jika tidak, metrik evaluasi ditandai belum tersedia.</p>
+</section>
+{% endblock %}
