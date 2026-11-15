@@ -1,61 +1,91 @@
 {% extends "base.html" %}
-{% block title %}Import Skor Historis · StressCheck{% endblock %}
+{% block title %}Analisis Skor Historis · StressCheck{% endblock %}
 {% block content %}
-<section class="page-heading">
-  <div>
-    <p class="eyebrow">DATA HISTORIS</p>
-    <h1>Import skor agregat</h1>
-    <p class="muted">Impor workbook Psikologi yang berisi enam skor faktor per karyawan.</p>
-  </div>
-  <a class="button button-secondary" href="{{ url_for('admin_dashboard') }}">← Dashboard</a>
+<section class="page-heading aggregate-heading">
+  <div><p class="eyebrow">DATA HISTORIS · ANALISIS DESKRIPTIF</p><h1>Analisis skor agregat</h1><p class="muted">Ringkasan enam faktor stres dari data historis karyawan yang telah diimpor.</p></div>
+  {% if selected_batch %}<a class="button button-primary" href="{{ url_for('export_aggregate_excel', batch_id=selected_batch.id, department=department_filter) }}">↓ Ekspor analisis Excel</a>{% endif %}
 </section>
 
-<div class="notice notice-info">
-  <strong>Catatan:</strong> data ini disimpan sebagai skor agregat historis. Data tidak diubah menjadi 30 jawaban item dan tidak langsung dipakai untuk training Naive Bayes yang saat ini membutuhkan jawaban per item beserta enam label.
-</div>
+{% if batches %}
+<section class="panel aggregate-filter-panel">
+  <form method="get" action="{{ url_for('import_aggregate') }}" class="aggregate-filter-form">
+    <label class="field"><span>Batch data</span><select name="batch_id" onchange="this.form.submit()">
+      {% for batch in batches %}<option value="{{ batch.id }}" {% if selected_batch and batch.id == selected_batch.id %}selected{% endif %}>#{{ batch.id }} · {{ batch.source_filename }} · {{ batch.total_records }} baris</option>{% endfor %}
+    </select></label>
+    <label class="field"><span>Filter departemen</span><select name="department">
+      <option value="">Semua departemen</option>
+      {% for department in departments %}<option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>{% endfor %}
+    </select></label>
+    <div class="filter-actions"><button class="button button-primary" type="submit">Terapkan filter</button><a class="button button-secondary" href="{{ url_for('import_aggregate', batch_id=selected_batch.id) }}">Reset</a></div>
+  </form>
+  {% if selected_batch %}<div class="batch-meta"><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span><span><strong>Oleh:</strong> {{ selected_batch.imported_by or '—' }}</span></div>{% endif %}
+</section>
 
-<section class="panel section-panel">
-  <div class="section-heading">
-    <div><p class="eyebrow">UPLOAD WORKBOOK</p><h2>Pilih file Excel</h2></div>
-  </div>
-  <p class="muted">Format yang dikenali: header berada di baris ke-4, diikuti kolom No, ID NUMBER, BAGIAN, enam skor faktor, dan Total. Kolom Cek tidak dibaca.</p>
-  <form method="post" enctype="multipart/form-data" class="upload-zone">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="file-picker">
-      <span class="file-icon">↑</span>
-      <strong>Pilih Psikologi 1.xlsx</strong>
-      <span class="muted small">Format .xlsx atau .xls · Maksimal 10 MB</span>
-      <input type="file" name="dataset" accept=".xlsx,.xls" required>
-    </label>
+{% if report %}
+<div class="notice notice-info aggregate-note">Kategori Ringan/Sedang/Berat di halaman ini dihitung dari skor agregat menggunakan ambang aturan yang dikonfigurasi pada aplikasi. Kategori tersebut adalah <strong>hasil aturan skor</strong>, bukan label ground-truth atau prediksi Naive Bayes.</div>
+<section class="aggregate-kpis">
+  <article class="stat-card"><span class="stat-label">Jumlah baris terfilter</span><strong>{{ report.respondents }}</strong><span class="stat-foot">Pada batch terpilih</span></article>
+  <article class="stat-card"><span class="stat-label">ID karyawan unik</span><strong>{{ report.unique_codes }}</strong><span class="stat-foot">Kode unik pada filter aktif</span></article>
+  <article class="stat-card"><span class="stat-label">Rata-rata total skor</span><strong>{{ report.average_total }}</strong><span class="stat-foot">Dari enam skor faktor</span></article>
+  <article class="stat-card"><span class="stat-label">Departemen ditampilkan</span><strong>{{ report.departments|length }}</strong><span class="stat-foot">Setelah filter diterapkan</span></article>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Skala 0–35 · data sumber</span></div>
+  <div class="factor-average-list">{% for factor in report.factors %}
+    <div class="factor-average-item"><div class="factor-average-head"><strong>{{ factor.name }}</strong><span><b>{{ factor.average }}</b> / 35</span></div>
+      <div class="aggregate-track"><span style="width: {{ (factor.average / 35 * 100)|round(1) }}%"></span></div>
+      <div class="factor-range"><span>Minimum {{ factor.minimum }}</span><span>Maksimum {{ factor.maximum }}</span></div>
+    </div>
+  {% endfor %}</div>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">DISTRIBUSI ATURAN SKOR</p><h2>Kategori per faktor</h2></div><span class="muted small">Bukan hasil model ML</span></div>
+  <div class="distribution-analysis">{% for factor in report.factors %}
+    <div class="distribution-analysis-item">
+      <div class="distribution-analysis-title"><strong>{{ factor.name }}</strong><span class="muted small">{{ factor.count }} responden</span></div>
+      <div class="stacked-bar" role="img" aria-label="{{ factor.name }}: {{ factor.counts['Stres Ringan'] }} ringan, {{ factor.counts['Stres Sedang'] }} sedang, {{ factor.counts['Stres Berat'] }} berat">
+        {% if factor.count %}
+          {% if factor.counts['Stres Ringan'] %}<span class="stack-light" style="width: {{ (factor.counts['Stres Ringan'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+          {% if factor.counts['Stres Sedang'] %}<span class="stack-medium" style="width: {{ (factor.counts['Stres Sedang'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+          {% if factor.counts['Stres Berat'] %}<span class="stack-heavy" style="width: {{ (factor.counts['Stres Berat'] / factor.count * 100)|round(2) }}%"></span>{% endif %}
+        {% endif %}
+      </div>
+      <div class="distribution-legend"><span><i class="legend-dot dot-light"></i>Ringan <b>{{ factor.counts['Stres Ringan'] }}</b></span><span><i class="legend-dot dot-medium"></i>Sedang <b>{{ factor.counts['Stres Sedang'] }}</b></span><span><i class="legend-dot dot-heavy"></i>Berat <b>{{ factor.counts['Stres Berat'] }}</b></span></div>
+    </div>
+  {% endfor %}</div>
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">PERBANDINGAN DEPARTEMEN</p><h2>Skor berdasarkan departemen</h2></div><span class="muted small">{{ report.departments|length }} departemen</span></div>
+  {% if report.departments %}<div class="table-wrap"><table><thead><tr><th>Departemen</th><th>Responden</th><th>Rata-rata total</th>{% for factor in report.factors %}<th>{{ factor.name }}</th>{% endfor %}</tr></thead><tbody>
+    {% for department in report.departments %}<tr><td><strong>{{ department.name }}</strong></td><td>{{ department.count }}</td><td>{{ department.average_total }}</td>{% for factor in report.factors %}<td>{{ department.averages[factor.column] }}</td>{% endfor %}</tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Tidak ada data untuk departemen yang dipilih.</div>{% endif %}
+</section>
+
+<section class="panel section-panel aggregate-section">
+  <div class="section-heading"><div><p class="eyebrow">DATA RESPONDEN</p><h2>Detail skor karyawan</h2></div><span class="muted small">Menampilkan {{ rows|length }} dari {{ total_filtered }} baris terfilter</span></div>
+  {% if rows %}<div class="table-wrap"><table class="aggregate-detail-table"><thead><tr><th>No.</th><th>ID karyawan</th><th>Departemen</th><th>Ketaksaan</th><th>Konflik</th><th>Beban kuantitatif</th><th>Beban kualitatif</th><th>Karir</th><th>Tanggung jawab</th><th>Total</th></tr></thead><tbody>
+    {% for row in rows %}<tr><td>{{ row.source_no or row.source_excel_row }}</td><td><strong>{{ row.employee_code }}</strong></td><td>{{ row.department or '—' }}</td><td>{{ row.ketaksaan_peran }}</td><td>{{ row.konflik_peran }}</td><td>{{ row.beban_kuantitatif }}</td><td>{{ row.beban_kualitatif }}</td><td>{{ row.pengembangan_karir }}</td><td>{{ row.tanggung_jawab }}</td><td><strong>{{ row.total_score }}</strong></td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="pagination"><span class="muted small">Halaman {{ page }} dari {{ total_pages }}</span><div>
+    {% if page > 1 %}<a class="button button-secondary" href="{{ url_for('import_aggregate', batch_id=selected_batch.id, department=department_filter, page=page-1) }}">← Sebelumnya</a>{% endif %}
+    {% if page < total_pages %}<a class="button button-secondary" href="{{ url_for('import_aggregate', batch_id=selected_batch.id, department=department_filter, page=page+1) }}">Berikutnya →</a>{% endif %}
+  </div></div>
+  {% else %}<div class="empty-state">Tidak ada baris yang sesuai dengan filter.</div>{% endif %}
+</section>
+{% endif %}
+{% else %}
+<section class="panel section-panel"><div class="empty-state">Belum ada batch data skor agregat. Unggah workbook di bawah ini untuk memulai.</div></section>
+{% endif %}
+
+<section class="panel section-panel aggregate-upload-section">
+  <div class="section-heading"><div><p class="eyebrow">IMPORT DATA BARU</p><h2>Unggah workbook skor agregat</h2></div></div>
+  <p class="muted">Header harus berada pada baris ke-4 dan berisi No, ID NUMBER, BAGIAN, enam skor faktor, serta Total. Kolom Cek diabaikan.</p>
+  <form method="post" enctype="multipart/form-data" class="upload-zone"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="file-picker"><span class="file-icon">↑</span><strong>Pilih file Excel (.xlsx / .xls)</strong><span class="muted small">Maksimal 10 MB</span><input type="file" name="dataset" accept=".xlsx,.xls" required></label>
     <button class="button button-primary button-large" type="submit">Validasi dan import</button>
   </form>
-</section>
-
-<section class="panel section-panel">
-  <div class="section-heading">
-    <div><p class="eyebrow">RIWAYAT IMPORT</p><h2>Batch yang pernah diimpor</h2></div>
-  </div>
-  {% if batches %}
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Batch</th><th>Nama file</th><th>Baris</th><th>Baris ID duplikat</th><th>Skor di bawah 5</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead>
-        <tbody>
-          {% for batch in batches %}
-            <tr>
-              <td>#{{ batch.id }}</td>
-              <td>{{ batch.source_filename }}</td>
-              <td>{{ batch.total_records }}</td>
-              <td>{{ batch.duplicate_code_rows }}</td>
-              <td>{{ batch.below_minimum_score_cells }}</td>
-              <td>{{ batch.imported_by or '—' }}</td>
-              <td>{{ batch.imported_at }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <div class="empty-state">Belum ada file skor agregat yang diimpor.</div>
-  {% endif %}
 </section>
 {% endblock %}
