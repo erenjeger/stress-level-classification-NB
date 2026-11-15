@@ -18,7 +18,15 @@
     </select></label>
     <div class="filter-actions"><button class="button button-primary" type="submit">Terapkan filter</button><a class="button button-secondary" href="{{ url_for('import_aggregate', batch_id=selected_batch.id) }}">Reset</a></div>
   </form>
-  {% if selected_batch %}<div class="batch-meta"><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span><span><strong>Oleh:</strong> {{ selected_batch.imported_by or '—' }}</span></div>{% endif %}
+  {% if selected_batch %}
+    <div class="batch-meta"><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span><span><strong>Oleh:</strong> {{ selected_batch.imported_by or '—' }}</span></div>
+    {% if selected_batch.duplicate_code_rows or selected_batch.below_minimum_score_cells %}
+      <div class="aggregate-data-warnings">
+        {% if selected_batch.duplicate_code_rows %}<span class="data-warning">Perhatian: {{ selected_batch.duplicate_code_rows }} baris memiliki kode karyawan duplikat.</span>{% endif %}
+        {% if selected_batch.below_minimum_score_cells %}<span class="data-warning">Perhatian: {{ selected_batch.below_minimum_score_cells }} sel skor berada di bawah 5 dan perlu diverifikasi.</span>{% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
 </section>
 
 {% if report %}
