@@ -262,7 +262,7 @@ def predict_factor(factor: dict, answers: dict):
     model = load_model(factor)
     if model is None:
         # Fallback ini adalah aturan skor, bukan prediksi Naive Bayes.
-        return score, rule_class(score), rule_class(score), None, "Aturan skor (model belum tersedia"
+        return score, rule_class(score), rule_class(score), None, "Aturan skor (model belum tersedia)"
 
     features = np.array(
         [[answers[q] - 1 for q in factor["questions"]]],
