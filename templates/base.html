@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sistem klasifikasi tingkat stres kerja karyawan">
+  <title>{% block title %}StressCheck{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container nav-wrap">
+      <a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">S</span><span>StressCheck</span></a>
+      <nav class="main-nav" aria-label="Navigasi utama">
+        <a href="{{ url_for('home') }}">Kuesioner</a>
+        {% if session.get('admin_id') %}
+          <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
+          <a href="{{ url_for('training') }}">Training Model</a>
+          <a href="{{ url_for('confusion') }}">Evaluasi</a>
+          <form method="post" action="{{ url_for('admin_logout') }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="nav-button" type="submit">Keluar</button>
+          </form>
+        {% else %}
+          <a href="{{ url_for('admin_login') }}">Admin</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack" role="status" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <div class="container">StressCheck · Sistem klasifikasi untuk kebutuhan pengolahan kuesioner dan penelitian.</div>
+  </footer>
+</body>
+</html>

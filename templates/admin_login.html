@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Login Admin · StressCheck{% endblock %}
+{% block content %}
+<section class="auth-wrap">
+  <div class="auth-card panel">
+    <p class="eyebrow">AREA ADMINISTRATOR</p>
+    <h1>Selamat datang kembali.</h1>
+    <p class="muted">Masuk untuk mengelola data dan model klasifikasi.</p>
+    <form method="post" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="field"><span>Username</span><input name="username" autocomplete="username" required autofocus></label>
+      <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="button button-primary button-large" type="submit">Login</button>
+    </form>
+    <a class="back-link" href="{{ url_for('home') }}">← Kembali ke kuesioner</a>
+  </div>
+</section>
+{% endblock %}
