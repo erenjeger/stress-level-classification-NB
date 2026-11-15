@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Import Skor Historis · StressCheck{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">DATA HISTORIS</p>
+    <h1>Import skor agregat</h1>
+    <p class="muted">Impor workbook Psikologi yang berisi enam skor faktor per karyawan.</p>
+  </div>
+  <a class="button button-secondary" href="{{ url_for('admin_dashboard') }}">← Dashboard</a>
+</section>
+
+<div class="notice notice-info">
+  <strong>Catatan:</strong> data ini disimpan sebagai skor agregat historis. Data tidak diubah menjadi 30 jawaban item dan tidak langsung dipakai untuk training Naive Bayes yang saat ini membutuhkan jawaban per item beserta enam label.
+</div>
+
+<section class="panel section-panel">
+  <div class="section-heading">
+    <div><p class="eyebrow">UPLOAD WORKBOOK</p><h2>Pilih file Excel</h2></div>
+  </div>
+  <p class="muted">Format yang dikenali: header berada di baris ke-4, diikuti kolom No, ID NUMBER, BAGIAN, enam skor faktor, dan Total. Kolom Cek tidak dibaca.</p>
+  <form method="post" enctype="multipart/form-data" class="upload-zone">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="file-picker">
+      <span class="file-icon">↑</span>
+      <strong>Pilih Psikologi 1.xlsx</strong>
+      <span class="muted small">Format .xlsx atau .xls · Maksimal 10 MB</span>
+      <input type="file" name="dataset" accept=".xlsx,.xls" required>
+    </label>
+    <button class="button button-primary button-large" type="submit">Validasi dan import</button>
+  </form>
+</section>
+
+<section class="panel section-panel">
+  <div class="section-heading">
+    <div><p class="eyebrow">RIWAYAT IMPORT</p><h2>Batch yang pernah diimpor</h2></div>
+  </div>
+  {% if batches %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Batch</th><th>Nama file</th><th>Baris</th><th>Baris ID duplikat</th><th>Skor di bawah 5</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead>
+        <tbody>
+          {% for batch in batches %}
+            <tr>
+              <td>#{{ batch.id }}</td>
+              <td>{{ batch.source_filename }}</td>
+              <td>{{ batch.total_records }}</td>
+              <td>{{ batch.duplicate_code_rows }}</td>
+              <td>{{ batch.below_minimum_score_cells }}</td>
+              <td>{{ batch.imported_by or '—' }}</td>
+              <td>{{ batch.imported_at }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">Belum ada file skor agregat yang diimpor.</div>
+  {% endif %}
+</section>
+{% endblock %}
