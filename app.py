@@ -185,6 +185,38 @@ def init_db():
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_import_batches (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            source_filename VARCHAR(255) NOT NULL,
+            total_records INTEGER NOT NULL,
+            duplicate_code_rows INTEGER NOT NULL DEFAULT 0,
+            below_minimum_score_cells INTEGER NOT NULL DEFAULT 0,
+            imported_by VARCHAR(80) NULL,
+            imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS aggregate_factor_scores (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            batch_id BIGINT NOT NULL,
+            source_no INTEGER NULL,
+            source_excel_row INTEGER NOT NULL,
+            employee_code VARCHAR(100) NOT NULL,
+            department VARCHAR(150) NULL,
+            ketaksaan_peran SMALLINT NOT NULL,
+            konflik_peran SMALLINT NOT NULL,
+            beban_kuantitatif SMALLINT NOT NULL,
+            beban_kualitatif SMALLINT NOT NULL,
+            pengembangan_karir SMALLINT NOT NULL,
+            tanggung_jawab SMALLINT NOT NULL,
+            total_score SMALLINT NOT NULL,
+            CONSTRAINT uq_aggregate_batch_row UNIQUE (batch_id, source_excel_row),
+            CONSTRAINT fk_aggregate_batch FOREIGN KEY (batch_id)
+                REFERENCES aggregate_import_batches(id) ON DELETE CASCADE,
+            INDEX idx_aggregate_employee_code (employee_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with db_connection() as conn:
         try:
@@ -743,6 +775,404 @@ def export_excel():
         buffer,
         as_attachment=True,
         download_name="data_stres_karyawan.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+AGGREGATE_FACTOR_FIELDS = [
+    {"key": "ketaksaan_peran", "name": "Ketaksaan Peran", "column": "ketaksaan_peran"},
+    {"key": "konflik_peran", "name": "Konflik Peran", "column": "konflik_peran"},
+    {"key": "beban_kuantitatif", "name": "Beban Berlebih Kuantitatif", "column": "beban_kuantitatif"},
+    {"key": "beban_kualitatif", "name": "Beban Berlebih Kualitatif", "column": "beban_kualitatif"},
+    {"key": "pengembangan_karir", "name": "Pengembangan Karir", "column": "pengembangan_karir"},
+    {"key": "tanggung_jawab", "name": "Tanggung Jawab terhadap Orang Lain", "column": "tanggung_jawab"},
+]
+
+
+def load_aggregate_rows(batch_id, department=None):
+    query = """
+        SELECT id, batch_id, source_no, source_excel_row, employee_code, department,
+               ketaksaan_peran, konflik_peran, beban_kuantitatif,
+               beban_kualitatif, pengembangan_karir, tanggung_jawab, total_score
+        FROM aggregate_factor_scores
+        WHERE batch_id=%s
+    """
+    params = [batch_id]
+    if department:
+        query += " AND department=%s"
+        params.append(department)
+    query += " ORDER BY source_no, source_excel_row"
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+
+def summarize_aggregate_rows(rows):
+    """Build descriptive score summaries; categories are rule-based, not ground truth."""
+    summaries = []
+    for factor in AGGREGATE_FACTOR_FIELDS:
+        values = [int(row[factor["column"]]) for row in rows]
+        counts = {label: 0 for label in CLASSES}
+        for value in values:
+            counts[rule_class(value)] += 1
+        summaries.append({
+            "key": factor["key"],
+            "name": factor["name"],
+            "column": factor["column"],
+            "average": round(sum(values) / len(values), 2) if values else 0,
+            "minimum": min(values) if values else 0,
+            "maximum": max(values) if values else 0,
+            "counts": counts,
+            "count": len(values),
+        })
+
+    grouped = {}
+    for row in rows:
+        name = (row.get("department") or "Tidak diisi").strip() or "Tidak diisi"
+        grouped.setdefault(name, []).append(row)
+
+    department_summaries = []
+    for name, department_rows in sorted(grouped.items(), key=lambda item: item[0].lower()):
+        department_summaries.append({
+            "name": name,
+            "count": len(department_rows),
+            "average_total": round(
+                sum(int(row["total_score"]) for row in department_rows) / len(department_rows), 2
+            ),
+            "averages": {
+                factor["column"]: round(
+                    sum(int(row[factor["column"]]) for row in department_rows)
+                    / len(department_rows),
+                    2,
+                )
+                for factor in AGGREGATE_FACTOR_FIELDS
+            },
+        })
+
+    total_values = [int(row["total_score"]) for row in rows]
+    unique_codes = len({str(row["employee_code"]) for row in rows})
+    return {
+        "factors": summaries,
+        "departments": department_summaries,
+        "respondents": len(rows),
+        "unique_codes": unique_codes,
+        "average_total": round(sum(total_values) / len(total_values), 2) if total_values else 0,
+    }
+
+
+@app.route("/admin/import-aggregate", methods=["GET", "POST"])
+@admin_required
+def import_aggregate():
+    """Import skor enam faktor dan tampilkan dashboard deskriptif data historis."""
+    if request.method == "GET":
+        with db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, source_filename, total_records, duplicate_code_rows,
+                           below_minimum_score_cells, imported_by, imported_at
+                    FROM aggregate_import_batches
+                    ORDER BY id DESC LIMIT 50
+                """)
+                batches = cur.fetchall()
+
+        requested_batch_id = request.args.get("batch_id", type=int)
+        selected_batch = next(
+            (batch for batch in batches if batch["id"] == requested_batch_id),
+            batches[0] if batches else None,
+        )
+        department_filter = request.args.get("department", "").strip()
+
+        if not selected_batch:
+            return render_template(
+                "aggregate_import.html",
+                batches=batches,
+                selected_batch=None,
+                departments=[],
+                department_filter="",
+                report=None,
+                rows=[],
+                page=1,
+                total_pages=1,
+                total_filtered=0,
+            )
+
+        batch_id = selected_batch["id"]
+        with db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT department
+                    FROM aggregate_factor_scores
+                    WHERE batch_id=%s AND department IS NOT NULL AND department <> ''
+                    ORDER BY department
+                """, (batch_id,))
+                departments = [row["department"] for row in cur.fetchall()]
+
+        if department_filter and department_filter not in departments:
+            department_filter = ""
+
+        all_rows = load_aggregate_rows(batch_id, department_filter or None)
+        report = summarize_aggregate_rows(all_rows)
+
+        page_size = 25
+        total_filtered = len(all_rows)
+        total_pages = max(1, math.ceil(total_filtered / page_size))
+        page_number = request.args.get("page", default=1, type=int) or 1
+        page_number = min(max(page_number, 1), total_pages)
+        start_index = (page_number - 1) * page_size
+        page_rows = all_rows[start_index:start_index + page_size]
+
+        return render_template(
+            "aggregate_import.html",
+            batches=batches,
+            selected_batch=selected_batch,
+            departments=departments,
+            department_filter=department_filter,
+            report=report,
+            rows=page_rows,
+            page=page_number,
+            total_pages=total_pages,
+            total_filtered=total_filtered,
+        )
+
+    uploaded = request.files.get("dataset")
+    if not uploaded or not uploaded.filename:
+        flash("Pilih file Excel terlebih dahulu.", "danger")
+        return redirect(url_for("import_aggregate"))
+
+    original_name = secure_filename(uploaded.filename)
+    extension = Path(original_name).suffix.lower()
+    if extension not in {".xlsx", ".xls"}:
+        flash("Impor skor agregat saat ini menerima file Excel .xlsx atau .xls.", "danger")
+        return redirect(url_for("import_aggregate"))
+
+    saved_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{original_name}"
+    uploaded.save(saved_path)
+
+    try:
+        dataframe = pd.read_excel(saved_path, header=3)
+        dataframe.columns = [str(column).strip() for column in dataframe.columns]
+        required = [
+            "No", "ID NUMBER", "BAGIAN",
+            "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain",
+            "Total",
+        ]
+        missing = [column for column in required if column not in dataframe.columns]
+        if missing:
+            raise ValueError(
+                "Kolom tidak sesuai dengan workbook Psikologi. Kolom yang belum ditemukan: "
+                + ", ".join(missing)
+            )
+
+        dataframe = dataframe[required].dropna(
+            subset=[
+                "ID NUMBER", "Ketaksan Peran", "Konflik Peran",
+                "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+                "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain", "Total",
+            ]
+        ).copy()
+        if dataframe.empty:
+            raise ValueError("Tidak ada baris data yang dapat diimpor.")
+
+        numeric_columns = [
+            "No", "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain", "Total",
+        ]
+        for column in numeric_columns:
+            numeric = pd.to_numeric(dataframe[column], errors="coerce")
+            if numeric.isna().any() or not np.equal(
+                numeric.to_numpy(), np.floor(numeric.to_numpy())
+            ).all():
+                raise ValueError(f"Kolom {column} harus berisi bilangan bulat dan tidak kosong.")
+            dataframe[column] = numeric.astype(int)
+
+        score_columns = [
+            "Ketaksan Peran", "Konflik Peran",
+            "Beban Berlebih Kuantitatif", "Beban Berlebih Kualitatif",
+            "Pengembangan Karir", "Tanggung Jawab Kepada Orang Lain",
+        ]
+        for column in score_columns:
+            if not dataframe[column].between(0, 35).all():
+                raise ValueError(f"Skor {column} harus berada pada rentang 0 sampai 35.")
+
+        mismatch_count = int(
+            (dataframe[score_columns].sum(axis=1) != dataframe["Total"]).sum()
+        )
+        if mismatch_count:
+            raise ValueError(
+                f"Ada {mismatch_count} baris dengan Total yang tidak sama dengan jumlah enam skor. "
+                "Perbaiki workbook sebelum impor."
+            )
+
+        def normalize_employee_code(value):
+            if pd.isna(value):
+                return ""
+            if isinstance(value, (int, np.integer)):
+                return str(int(value))
+            if isinstance(value, (float, np.floating)) and float(value).is_integer():
+                return str(int(value))
+            return str(value).strip()
+
+        dataframe["employee_code_normalized"] = dataframe["ID NUMBER"].apply(
+            normalize_employee_code
+        )
+        if (dataframe["employee_code_normalized"] == "").any():
+            raise ValueError("Terdapat ID NUMBER kosong.")
+
+        duplicate_code_rows = int(
+            dataframe["employee_code_normalized"].duplicated(keep=False).sum()
+        )
+        below_minimum_score_cells = int((dataframe[score_columns] < 5).sum().sum())
+        records = []
+        for dataframe_index, row in dataframe.iterrows():
+            excel_row = int(dataframe_index) + 5
+            department = None if pd.isna(row["BAGIAN"]) else str(row["BAGIAN"]).strip()
+            records.append((
+                excel_row,
+                int(row["No"]) if pd.notna(row["No"]) else None,
+                row["employee_code_normalized"],
+                department or None,
+                int(row["Ketaksan Peran"]),
+                int(row["Konflik Peran"]),
+                int(row["Beban Berlebih Kuantitatif"]),
+                int(row["Beban Berlebih Kualitatif"]),
+                int(row["Pengembangan Karir"]),
+                int(row["Tanggung Jawab Kepada Orang Lain"]),
+                int(row["Total"]),
+            ))
+
+        with db_connection() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO aggregate_import_batches
+                        (source_filename, total_records, duplicate_code_rows,
+                         below_minimum_score_cells, imported_by)
+                        VALUES(%s, %s, %s, %s, %s)
+                    """, (
+                        original_name, len(records), duplicate_code_rows,
+                        below_minimum_score_cells, session.get("admin_username"),
+                    ))
+                    batch_id = cur.lastrowid
+                    cur.executemany("""
+                        INSERT INTO aggregate_factor_scores
+                        (batch_id, source_excel_row, source_no, employee_code, department,
+                         ketaksaan_peran, konflik_peran, beban_kuantitatif,
+                         beban_kualitatif, pengembangan_karir, tanggung_jawab, total_score)
+                        VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, [
+                        (
+                            batch_id, excel_row, source_no, employee_code, department,
+                            ketaksaan, konflik, beban_kuantitatif, beban_kualitatif,
+                            karir, tanggung_jawab, total,
+                        )
+                        for (
+                            excel_row, source_no, employee_code, department,
+                            ketaksaan, konflik, beban_kuantitatif, beban_kualitatif,
+                            karir, tanggung_jawab, total,
+                        ) in records
+                    ])
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        flash(f"Berhasil mengimpor {len(records)} baris skor agregat ke batch #{batch_id}.", "success")
+        if duplicate_code_rows:
+            flash(
+                f"Perhatian: {duplicate_code_rows} baris memiliki ID NUMBER duplikat. "
+                "Semua baris tetap disimpan dan tidak digabung otomatis.",
+                "warning",
+            )
+        if below_minimum_score_cells:
+            flash(
+                f"Perhatian: ditemukan {below_minimum_score_cells} nilai skor di bawah 5. "
+                "Nilai asli dipertahankan; verifikasi terhadap sumber kuesioner.",
+                "warning",
+            )
+        return redirect(url_for("import_aggregate", batch_id=batch_id))
+    except Exception as error:
+        logger.exception("Impor skor agregat gagal.")
+        flash(f"Impor gagal: {error}", "danger")
+        return redirect(url_for("import_aggregate"))
+    finally:
+        try:
+            saved_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Tidak dapat menghapus file upload sementara: %s", saved_path)
+
+
+@app.route("/admin/import-aggregate/export.xlsx")
+@admin_required
+def export_aggregate_excel():
+    batch_id = request.args.get("batch_id", type=int)
+    if not batch_id:
+        flash("Pilih batch impor yang ingin diekspor.", "warning")
+        return redirect(url_for("import_aggregate"))
+
+    department = request.args.get("department", "").strip()
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source_filename FROM aggregate_import_batches WHERE id=%s",
+                (batch_id,),
+            )
+            batch = cur.fetchone()
+    if not batch:
+        abort(404)
+
+    rows = load_aggregate_rows(batch_id, department or None)
+    report = summarize_aggregate_rows(rows)
+    detail_columns = [
+        "source_no", "source_excel_row", "employee_code", "department",
+        "ketaksaan_peran", "konflik_peran", "beban_kuantitatif",
+        "beban_kualitatif", "pengembangan_karir", "tanggung_jawab", "total_score",
+    ]
+    detail = pd.DataFrame(rows)[detail_columns] if rows else pd.DataFrame(columns=detail_columns)
+    summary = pd.DataFrame([
+        {
+            "Faktor": item["name"],
+            "Rata-rata skor": item["average"],
+            "Skor minimum": item["minimum"],
+            "Skor maksimum": item["maximum"],
+            "Jumlah responden": item["count"],
+        }
+        for item in report["factors"]
+    ])
+    distribution = pd.DataFrame([
+        {
+            "Faktor": item["name"],
+            "Stres Ringan (aturan skor)": item["counts"][CLASSES[0]],
+            "Stres Sedang (aturan skor)": item["counts"][CLASSES[1]],
+            "Stres Berat (aturan skor)": item["counts"][CLASSES[2]],
+        }
+        for item in report["factors"]
+    ])
+    department_rows = []
+    for item in report["departments"]:
+        record = {
+            "Departemen": item["name"],
+            "Jumlah responden": item["count"],
+            "Rata-rata total skor": item["average_total"],
+        }
+        for factor in AGGREGATE_FACTOR_FIELDS:
+            record[f"Rata-rata {factor['name']}"] = item["averages"][factor["column"]]
+        department_rows.append(record)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        summary.to_excel(writer, index=False, sheet_name="Ringkasan")
+        distribution.to_excel(writer, index=False, sheet_name="Distribusi")
+        pd.DataFrame(department_rows).to_excel(writer, index=False, sheet_name="Per Departemen")
+        detail.to_excel(writer, index=False, sheet_name="Detail Data")
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"analisis_skor_agregat_batch_{batch_id}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
