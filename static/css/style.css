@@ -118,3 +118,6 @@ a:hover{color:var(--brand-dark)}
 .aggregate-upload-section{border-style:dashed}
 @media(max-width:900px){.aggregate-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.aggregate-filter-form{grid-template-columns:1fr 1fr}.filter-actions{grid-column:1/-1}}
 @media(max-width:650px){.aggregate-filter-form,.aggregate-kpis,.factor-average-list,.distribution-analysis{grid-template-columns:1fr}.filter-actions{grid-column:auto}.batch-meta{display:grid;gap:6px}.pagination{align-items:flex-start;flex-direction:column}.aggregate-section{padding:18px}}
+
+.aggregate-data-warnings{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.data-warning{display:inline-block;padding:7px 10px;border:1px solid #f1dfb9;border-radius:8px;background:#fff8e9;color:#815d22;font-size:.76rem}
