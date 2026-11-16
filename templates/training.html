@@ -3,57 +3,128 @@
 {% block content %}
 <section class="page-heading">
   <div>
-    <p class="eyebrow">IMPORT REKAP PERUSAHAAN · MACHINE LEARNING</p>
-    <h1>Training dari skor faktor</h1>
-    <p class="muted">Unggah workbook rekap psikologi perusahaan. Sistem membaca enam skor faktor per responden dan melatih enam model Categorical Naive Bayes.</p>
+    <h1>Import dan training model</h1>
+    <p class="muted">Gunakan workbook rekap perusahaan yang berisi skor enam faktor. Jawaban mentah 30 pertanyaan tidak dibutuhkan.</p>
   </div>
+  <a class="button button-secondary" href="{{ url_for('import_aggregate', source='aggregate') }}">Lihat data hasil impor</a>
 </section>
 
-<div class="notice notice-info">
-  <strong>Data rahasia tetap dihormati.</strong> Proses ini tidak memerlukan data jawaban 30 pertanyaan. Aplikasi menyimpan enam skor faktor yang tersedia pada workbook; aplikasi tidak merekonstruksi atau mengarang jawaban per butir.
+<div class="training-layout">
+  <section class="training-main" aria-labelledby="training-upload-title">
+    <div class="training-section-head">
+      <div>
+        <p class="eyebrow">SUMBER DATA</p>
+        <h2 id="training-upload-title">Unggah workbook perusahaan</h2>
+      </div>
+      <span class="format-label">Excel · XLSX / XLS</span>
+    </div>
+
+    <p class="training-lead">Aplikasi membaca enam skor faktor dari setiap baris responden, kemudian membentuk submission dan melatih enam model Categorical Naive Bayes.</p>
+
+    <form method="post" enctype="multipart/form-data" class="training-upload-form" id="training-upload-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="file-picker training-file-picker" for="dataset-file">
+        <span class="file-icon" aria-hidden="true">↑</span>
+        <span class="file-picker-copy">
+          <strong>Pilih file rekap skor</strong>
+          <span class="muted small">Pilih file .xlsx atau .xls dari komputer Anda</span>
+        </span>
+        <input id="dataset-file" type="file" name="dataset" accept=".xlsx,.xls,.csv" required>
+      </label>
+      <div class="training-submit-row">
+        <span class="muted small">Maksimal ukuran file 10 MB.</span>
+        <button class="button button-primary button-large" type="submit" id="training-submit-button">Mulai import dan training</button>
+      </div>
+      <p class="training-form-status small muted" id="training-form-status" role="status" aria-live="polite"></p>
+    </form>
+
+    <div class="training-field-map">
+      <h3>Kolom yang dibaca</h3>
+      <p class="muted small">Nama header pada workbook dapat berada di beberapa baris awal. Sistem mencari nama kolom berikut secara otomatis.</p>
+      <div class="field-map-grid">
+        <div><span>Identitas</span><strong>ID NUMBER</strong></div>
+        <div><span>Departemen</span><strong>BAGIAN</strong></div>
+        <div><span>Nama (jika tersedia)</span><strong>Cek</strong></div>
+        <div><span>Faktor 1</span><strong>Ketaksan Peran</strong></div>
+        <div><span>Faktor 2</span><strong>Konflik Peran</strong></div>
+        <div><span>Faktor 3</span><strong>Beban Berlebih Kuantitatif</strong></div>
+        <div><span>Faktor 4</span><strong>Beban Berlebih Kualitatif</strong></div>
+        <div><span>Faktor 5</span><strong>Pengembangan Karir</strong></div>
+        <div><span>Faktor 6</span><strong>Tanggung Jawab Kepada Orang Lain</strong></div>
+        <div><span>Total (opsional)</span><strong>Total</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="training-aside">
+    <section class="training-aside-section">
+      <h2>Bagaimana model dilatih?</h2>
+      <ol class="training-steps">
+        <li><span>01</span><div><strong>Baca skor sumber</strong><p>Enam skor numerik per responden disimpan apa adanya.</p></div></li>
+        <li><span>02</span><div><strong>Bentuk kategori target</strong><p>Kategori dihitung dari aturan skor aplikasi yang harus diverifikasi dengan pedoman penelitian.</p></div></li>
+        <li><span>03</span><div><strong>Latih enam model</strong><p>Setiap model memakai kategori lima faktor lain untuk memprediksi kategori faktor target.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="training-aside-section training-method-note">
+      <h2>Catatan metodologis</h2>
+      <p>Target kategori berasal dari ambang skor yang sama dengan aturan pembanding. Karena itu, akurasi holdout bukan validasi independen atas instrumen atau bukti keunggulan Naive Bayes.</p>
+      <p class="small muted">Jawaban 30 item tidak dibuat atau direkonstruksi karena tidak tersedia dari perusahaan.</p>
+    </section>
+  </aside>
 </div>
-<div class="notice notice-warning">
-  <strong>Bagaimana kategori dan model dibuat?</strong>
-  File sumber berisi skor angka, bukan label kategori teks. Aplikasi membentuk target kategori per faktor memakai ambang yang saat ini digunakan: skor ≤ 9 = Stres Ringan, 10–24 = Stres Sedang, dan > 24 = Stres Berat. Setiap model memprediksi kategori satu faktor menggunakan kategori lima faktor lainnya sebagai fitur. Akurasi mengukur kesesuaian terhadap kategori turunan tersebut, bukan validasi independen atas instrumen atau bukti bahwa model lebih baik daripada aturan skor.
-</div>
 
-<section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">FORMAT WORKBOOK</p><h2>Kolom yang dibaca</h2></div></div>
-  <p class="muted">Aplikasi mencari header secara otomatis pada bagian awal sheet Excel, sehingga judul atau baris metadata di atas tabel diperbolehkan. Untuk workbook <strong>Psikologi 1(1).xlsx</strong>, header berada pada baris ke-4.</p>
-  <div class="table-wrap"><table><thead><tr><th>Jenis kolom</th><th>Nama pada workbook</th><th>Penggunaan</th></tr></thead><tbody>
-    <tr><td>Identitas</td><td><code>ID NUMBER</code>, <code>BAGIAN</code>, <code>Cek</code></td><td>Kode karyawan, departemen, dan nama jika tersedia</td></tr>
-    <tr><td>Skor faktor 1</td><td><code>Ketaksan Peran</code></td><td>Skor agregat Ketaksaan Peran</td></tr>
-    <tr><td>Skor faktor 2</td><td><code>Konflik Peran</code></td><td>Skor agregat Konflik Peran</td></tr>
-    <tr><td>Skor faktor 3</td><td><code>Beban Berlebih Kuantitatif</code></td><td>Skor agregat Beban Berlebih Kuantitatif</td></tr>
-    <tr><td>Skor faktor 4</td><td><code>Beban Berlebih Kualitatif</code></td><td>Skor agregat Beban Berlebih Kualitatif</td></tr>
-    <tr><td>Skor faktor 5</td><td><code>Pengembangan Karir</code></td><td>Skor agregat Pengembangan Karir</td></tr>
-    <tr><td>Skor faktor 6</td><td><code>Tanggung Jawab Kepada Orang Lain</code></td><td>Skor agregat Tanggung Jawab terhadap Orang Lain</td></tr>
-    <tr><td>Total (opsional)</td><td><code>Total</code></td><td>Jika tersedia, divalidasi terhadap jumlah enam skor faktor</td></tr>
-  </tbody></table></div>
-</section>
-
-<section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">UPLOAD DAN TRAINING</p><h2>Unggah workbook rekap</h2></div></div>
-  <form method="post" enctype="multipart/form-data" class="upload-zone">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="file-picker"><span class="file-icon">↑</span><strong>Pilih file Excel rekap faktor</strong><span class="muted small">Format .xlsx atau .xls · Maksimal 10 MB</span><input type="file" name="dataset" accept=".xlsx,.xls,.csv" required></label>
-    <button class="button button-primary button-large" type="submit">Import rekap & training 6 model Naive Bayes</button>
-  </form>
-  <p class="small muted">Satu baris workbook diproses sebagai satu submission dengan enam skor faktor. File identik yang sudah pernah diimpor akan ditolak untuk mencegah duplikasi. Format dataset jawaban mentah lama tetap dapat diproses sebagai kompatibilitas, tetapi tidak diperlukan untuk workbook rekap faktor.</p>
-</section>
-
-<section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">RIWAYAT IMPORT</p><h2>Workbook dan dataset yang pernah diimpor</h2></div><a class="text-link" href="{{ url_for('import_aggregate') }}">Lihat analisis submission →</a></div>
+<section class="training-history" aria-labelledby="training-history-title">
+  <div class="section-heading">
+    <div>
+      <h2 id="training-history-title">Riwayat import</h2>
+      <p class="muted small">Batch yang pernah diproses pada aplikasi ini.</p>
+    </div>
+  </div>
   {% if batches %}
-    <div class="table-wrap"><table><thead><tr><th>Batch</th><th>File</th><th>Jenis data</th><th>Responden</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead><tbody>
-      {% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_filename }}</td><td>{% if batch.import_type == 'aggregate_factor_scores' %}Rekap skor faktor{% else %}Jawaban item{% endif %}</td><td>{{ batch.total_records }}</td><td>{{ batch.imported_by or '—' }}</td><td>{{ batch.imported_at }}</td></tr>{% endfor %}
-    </tbody></table></div>
-  {% else %}<div class="empty-state">Belum ada file yang diimpor.</div>{% endif %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Batch</th><th>Nama file</th><th>Jenis data</th><th>Responden</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead>
+        <tbody>
+        {% for batch in batches %}
+          <tr>
+            <td class="table-id">#{{ batch.id }}</td>
+            <td><strong>{{ batch.source_filename }}</strong></td>
+            <td>{% if batch.import_type == 'aggregate_factor_scores' %}Rekap skor faktor{% else %}Jawaban item{% endif %}</td>
+            <td class="numeric">{{ batch.total_records }}</td>
+            <td>{{ batch.imported_by or '—' }}</td>
+            <td>{{ batch.imported_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">Belum ada file yang diimpor.</div>
+  {% endif %}
 </section>
+{% endblock %}
 
-<section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">OUTPUT MODEL</p><h2>Enam model per faktor</h2></div></div>
-  <div class="factor-grid">{% for factor in factors %}<div class="factor-chip"><span>0{{ loop.index }}</span>{{ factor.name }}</div>{% endfor %}</div>
-  <p class="small muted">Untuk workbook rekap, fitur sebuah model adalah kategori lima faktor lainnya yang sudah diturunkan dari skor. Jawaban 30 item tidak disimpan karena memang tidak tersedia dari sumber penelitian.</p>
-</section>
+{% block scripts %}
+<script>
+  (() => {
+    const form = document.getElementById("training-upload-form");
+    const fileInput = document.getElementById("dataset-file");
+    const submitButton = document.getElementById("training-submit-button");
+    const status = document.getElementById("training-form-status");
+    if (!form || !fileInput || !submitButton || !status) return;
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      status.textContent = file ? "File dipilih: " + file.name : "";
+    });
+
+    form.addEventListener("submit", () => {
+      if (!fileInput.files || !fileInput.files.length) return;
+      submitButton.disabled = true;
+      submitButton.textContent = "Memproses dataset…";
+      status.textContent = "Validasi, import, dan training sedang berjalan. Jangan tutup halaman ini.";
+    });
+  })();
+</script>
 {% endblock %}
