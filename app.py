@@ -504,6 +504,15 @@ def prepare_aggregate_dataframe(dataframe: pd.DataFrame):
             warnings.append(
                 f"{factor['name']}: kategori {', '.join(missing_classes)} tidak ditemukan pada data training."
             )
+        rare_classes = [
+            f"{label} ({int(count)} sampel)"
+            for label, count in labels.value_counts().items()
+            if int(count) < 5
+        ]
+        if rare_classes:
+            warnings.append(
+                f"{factor['name']}: kelas dengan sampel sangat sedikit: {', '.join(rare_classes)}."
+            )
 
     return dataframe, warnings
 
