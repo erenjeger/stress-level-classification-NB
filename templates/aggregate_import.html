@@ -16,7 +16,7 @@
     </select></label>
     <label class="field"><span>Batch training</span><select name="batch_id">
       <option value="">Semua batch</option>
-      {% for batch in batches %}<option value="{{ batch.id }}" {% if batch_id == batch.id %}selected{% endif %}>#{{ batch.id }} · {{ batch.source_filename }} ({{ batch.total_records }})</option>{% endfor %}
+      {% for batch in batches %}<option value="{{ batch.id }}" {% if batch_id == batch.id %}selected{% endif %}>#{{ batch.id }} · {% if batch.import_type == 'aggregate_factor_scores' %}Rekap faktor{% else %}Jawaban item{% endif %} · {{ batch.source_filename }} ({{ batch.total_records }})</option>{% endfor %}
     </select></label>
     <label class="field"><span>Departemen</span><select name="department">
       <option value="">Semua departemen</option>
@@ -50,7 +50,7 @@
 </section>
 
 <section class="panel section-panel aggregate-section">
-  <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Skala matematis 5–35</span></div>
+  <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Rentang teoritis 5–35</span></div>
   <div class="factor-average-list">{% for factor in report.factors %}
     <div class="factor-average-item"><div class="factor-average-head"><strong>{{ factor.name }}</strong><span><b>{{ factor.average }}</b> / 35</span></div>
       <div class="aggregate-track"><span style="width: {{ (factor.average / 35 * 100)|round(1) }}%"></span></div>
