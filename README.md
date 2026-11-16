@@ -1,24 +1,26 @@
 # Stress Level Classification — Naive Bayes
 
-Aplikasi Flask untuk pengisian kuesioner stres kerja karyawan, klasifikasi enam faktor menggunakan Categorical Naive Bayes, dashboard admin, evaluasi model, riwayat, dan ekspor Excel.
+Aplikasi Flask untuk pengolahan data stres kerja karyawan dengan enam faktor, Categorical Naive Bayes, dashboard admin, evaluasi model, riwayat submission, dan ekspor Excel.
 
-> Aplikasi ini adalah alat bantu pengolahan kuesioner/penelitian, bukan alat diagnosis medis atau psikologis.
+> Aplikasi ini adalah alat bantu pengolahan data penelitian, bukan alat diagnosis medis atau psikologis.
 
 ## Fitur
 
 - Form publik tanpa login untuk 30 pernyataan skala 1–7.
-- Perhitungan skor enam faktor.
-- Prediksi Naive Bayes per faktor jika model sudah dilatih; fallback aturan skor ditandai secara eksplisit.
-- Login admin, dashboard, riwayat, dan ekspor Excel.
-- Upload dataset CSV/Excel, training enam model CategoricalNB, holdout evaluation, confusion matrix, dan classification report.
-- Upload dataset training juga mengimpor setiap responden sebagai submission, menyimpan 30 jawaban dan enam label target, lalu melatih enam model.
-- Halaman Analisis Submission membaca data dari tabel submissions dan factor_results, dengan filter sumber/batch/departemen, ringkasan enam faktor, distribusi kategori, tabel detail, dan ekspor Excel.
-- Label training, prediksi Naive Bayes, dan fallback aturan skor disimpan serta ditampilkan secara terpisah.
+- Import workbook rekap skor agregat enam faktor dari perusahaan, tanpa membutuhkan jawaban per butir.
+- Deteksi otomatis baris header workbook pada beberapa baris pertama sheet Excel.
+- Pembuatan kategori target dari skor faktor dengan ambang yang dikonfigurasi pada aplikasi.
+- Training enam model Categorical Naive Bayes; setiap model memprediksi kategori satu faktor dari kategori lima faktor lainnya.
+- Prediksi pada kuesioner publik menggunakan kategori skor lima faktor lain sebagai fitur jika model agregat tersedia.
+- Kompatibilitas dengan dataset lama yang berisi jawaban_1–jawaban_30 dan enam kolom label.
+- Login admin, dashboard, riwayat, confusion matrix, classification report, dan ekspor Excel.
+- Analisis submission dengan filter sumber, batch, dan departemen.
+- Label target, prediksi Naive Bayes, dan fallback aturan skor ditampilkan sebagai sumber hasil yang berbeda.
 - MySQL/MariaDB melalui PyMySQL.
 
 ## Teknologi
 
-Python, Flask, Flask-WTF (CSRF), MySQL/MariaDB, PyMySQL, pandas, NumPy, scikit-learn, joblib, dan openpyxl.
+Python, Flask, Flask-WTF (CSRF), MySQL/MariaDB, PyMySQL, pandas, NumPy, scikit-learn, joblib, openpyxl, dan xlrd.
 
 ## Persyaratan
 
@@ -86,59 +88,64 @@ Buka:
 
 Tabel dibuat otomatis. Akun admin pertama dibuat dari `ADMIN_USERNAME` dan `ADMIN_PASSWORD` saat aplikasi mulai, jika username tersebut belum ada.
 
-Jika variabel admin diubah setelah akun sudah dibuat, password lama tidak otomatis diganti. Perubahan password perlu dilakukan melalui mekanisme pengelolaan akun yang aman atau pembaruan hash di database.
+Jika variabel admin diubah setelah akun sudah dibuat, password lama tidak otomatis diganti.
 
-## Import Dataset dan Analisis Submission
+## Alur import workbook rekap skor faktor
 
-Menu **Training Model** menerima dataset per responden yang berisi 30 jawaban dan enam label target. Proses ini:
-1. Memvalidasi seluruh jawaban serta enam label.
-2. Mencatat batch impor (duplikat file identik ditolak).
-3. Membuat satu employee dan satu submission untuk setiap baris dataset.
-4. Menyimpan 30 jawaban di tabel `answers`.
-5. Menyimpan skor faktor dan target dataset di `factor_results.training_label`.
-6. Melatih enam model Categorical Naive Bayes dan menyimpan metrik evaluasi.
+Menu **Training Model** kini memprioritaskan workbook Excel rekap dari perusahaan, misalnya `Psikologi 1(1).xlsx`. Parser mencari header pada 15 baris pertama di setiap sheet. Workbook sumber yang sudah diperiksa memiliki header pada baris ke-4 di sheet `Yang dikirim`.
 
-Kolom identitas pada template bersifat opsional: `employee_code`, `employee_name`, dan `department`. Jika tidak ada, aplikasi membuat nama generik `Responden 001`, dan seterusnya.
+Kolom yang dikenali:
+- `ID NUMBER`: kode karyawan.
+- `BAGIAN`: departemen/bagian.
+- `Cek`: nama karyawan bila diisi nama.
+- `Ketaksan Peran`
+- `Konflik Peran`
+- `Beban Berlebih Kuantitatif`
+- `Beban Berlebih Kualitatif`
+- `Pengembangan Karir`
+- `Tanggung Jawab Kepada Orang Lain`
+- `Total` (opsional; jika tersedia dibandingkan dengan penjumlahan enam skor faktor).
 
-Menu **Analisis Submission** membaca langsung data dari `submissions` dan `factor_results`, bukan meminta upload workbook terpisah. Halaman ini menyediakan:
-- Filter sumber (semua, dataset training, atau form karyawan), batch, dan departemen.
-- KPI jumlah submission, identitas responden, rata-rata total skor, dan jumlah departemen.
-- Rata-rata, minimum, dan maksimum enam faktor.
-- Distribusi kategori yang mengambil label dataset untuk submission impor, prediksi model untuk form dengan model, atau fallback aturan skor jika model belum tersedia.
-- Keterangan asal kategori agar label training tidak disalahartikan sebagai prediksi Naive Bayes.
-- Perbandingan departemen, tabel detail dengan pagination, dan ekspor Excel empat sheet.
+Proses import:
+1. Membaca enam skor numerik agregat dari setiap baris responden.
+2. Memeriksa bahwa skor berupa bilangan bulat dalam rentang 0–35. Nilai di bawah 5 tetap disimpan apa adanya dan diberi peringatan, tidak dikoreksi otomatis.
+3. Menghasilkan target kategori untuk masing-masing faktor berdasarkan aturan skor aplikasi.
+4. Melatih enam model Categorical Naive Bayes. Untuk model faktor tertentu, fitur yang digunakan adalah kategori dari lima faktor lainnya; kategori faktor yang menjadi target tidak dimasukkan sebagai fitur model itu.
+5. Menyimpan satu submission dan enam hasil faktor per baris workbook. Tidak ada baris yang dimasukkan ke tabel `answers`, karena jawaban item mentah memang tidak tersedia.
+6. Menyimpan hasil evaluasi holdout stratified dan file model.
 
-Tabel `aggregate_import_batches` dan `aggregate_factor_scores` dari versi impor lama tetap dipertahankan untuk menjaga data historis sebelumnya, tetapi dashboard baru berpusat pada tabel submission.
+Setiap file dengan SHA-256 yang sama hanya dapat diimpor sekali. Duplikasi kode karyawan tidak otomatis dihapus; baris sumber dipertahankan dan diberi peringatan.
 
-## Dataset Training
+### Catatan metodologis penting
 
-Buka menu **Training Model** setelah login admin, lalu unduh template CSV. Isi:
-- `answer_1` sampai `answer_30`: bilangan bulat 1–7.
-- Enam kolom label:
-  - `label_ketaksaan_peran`
-  - `label_konflik_peran`
-  - `label_beban_kuantitatif`
-  - `label_beban_kualitatif`
-  - `label_pengembangan_karir`
-  - `label_tanggung_jawab`
-
-Nilai label harus tepat salah satu dari:
-- `Stres Ringan`
-- `Stres Sedang`
-- `Stres Berat`
-
-Satu baris mewakili satu responden dan harus memiliki jawaban serta keenam label. Aplikasi melatih satu model untuk setiap faktor. Evaluasi holdout stratified dilakukan hanya ketika ukuran dan distribusi kelas memadai.
-
-### Catatan metodologi
-
-Supervised Naive Bayes membutuhkan label yang valid untuk setiap faktor. Jika label training dihasilkan dari aturan ambang skor yang sama dengan pembanding, model pada dasarnya mempelajari aturan tersebut. Akurasi terhadap label turunan seperti ini bukan bukti kemampuan prediktif independen. Jelaskan sumber label, prosedur pembagian data, dan keterbatasan ukuran dataset dalam laporan penelitian.
-
-Aturan skor pada aplikasi saat ini mengikuti implementasi awal:
+Workbook rekap yang diperiksa berisi **skor agregat**, bukan kolom kategori teks. Karena itu, kategori target dibentuk oleh aplikasi menggunakan ambang yang saat ini dipakai:
 - Skor ≤ 9: Stres Ringan
 - Skor 10–24: Stres Sedang
 - Skor > 24: Stres Berat
 
-Aturan ini diterapkan pada skor **masing-masing faktor** dan harus diverifikasi terhadap instrumen/metodologi penelitian sebelum digunakan sebagai kriteria final.
+Ambang ini harus diverifikasi terhadap instrumen dan pedoman resmi penelitian sebelum hasil digunakan. Karena label target diturunkan dari skor menggunakan aturan tersebut, akurasi holdout bukan validasi independen atas kategori atau bukti bahwa Naive Bayes lebih unggul daripada aturan skor. Untuk workbook rekap, model mempelajari pola hubungan kategori antarfaktor. Kategori "Berat" yang tidak ada pada faktor tertentu juga tidak dapat dipelajari oleh model untuk faktor tersebut.
+
+Saat kuesioner publik diisi, aplikasi menghitung enam skor dari 30 jawaban, mengubah lima faktor lain menjadi kategori fitur, lalu meminta model memprediksi kategori faktor target. Kategori aturan skor tetap ditampilkan sebagai pembanding. Jika model agregat belum tersedia, aplikasi menggunakan fallback aturan skor.
+
+## Kompatibilitas dataset jawaban item lama
+
+Aplikasi masih menerima CSV/Excel lama yang berisi:
+- `answer_1` sampai `answer_30`, masing-masing bilangan bulat 1–7.
+- Enam label target: `label_ketaksaan_peran`, `label_konflik_peran`, `label_beban_kuantitatif`, `label_beban_kualitatif`, `label_pengembangan_karir`, dan `label_tanggung_jawab`.
+- Kolom identitas opsional: `employee_code`, `employee_name`, dan `department`.
+
+Dataset jawaban item disimpan dengan `source_type='dataset'`; workbook rekap skor faktor disimpan sebagai `source_type='aggregate'`; kuesioner publik memakai `source_type='form'`.
+
+## Analisis Submission
+
+Menu **Analisis Submission** membaca data dari `submissions` dan `factor_results`, dengan:
+- Filter sumber (semua, rekap skor faktor, dataset jawaban item, atau form), batch, dan departemen.
+- Jumlah submission, identitas responden, rerata skor faktor, dan jumlah departemen.
+- Rerata, minimum, maksimum, dan distribusi kategori enam faktor.
+- Perbandingan departemen, tabel detail dengan pagination, dan ekspor Excel.
+- Keterangan apakah kategori berasal dari skor agregat, label dataset, prediksi Naive Bayes, atau fallback aturan skor.
+
+Tabel `aggregate_import_batches` dan `aggregate_factor_scores` dari versi impor lama tetap dipertahankan untuk menjaga data historis. Dashboard saat ini berpusat pada tabel submission.
 
 ## Struktur utama
 
@@ -164,8 +171,9 @@ requirements.txt
 ## Database tables
 
 - `employees`
+- `dataset_import_batches`
 - `submissions`
-- `answers`
+- `answers` (hanya jika jawaban per butir tersedia)
 - `factor_results`
 - `model_metrics`
 - `admin_users`
@@ -180,4 +188,4 @@ requirements.txt
 
 ## Status
 
-Implementasi awal pada branch pengembangan. Lakukan pengujian fungsional di lingkungan XAMPP lokal sebelum digunakan untuk pengumpulan data penelitian.
+Perubahan alur rekap skor faktor berada pada branch pengembangan `feature/aggregate-score-dashboard`. Lakukan pengujian fungsional di lingkungan lokal XAMPP sebelum digunakan untuk analisis penelitian.
