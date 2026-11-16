@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Evaluasi Model · StressCheck{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">MODEL EVALUATION</p><h1>Evaluasi model</h1><p class="muted">Confusion matrix dan classification report per faktor, berdasarkan holdout evaluation terakhir.</p></div><a class="button button-secondary" href="{{ url_for('training') }}">Training ulang</a></section>
+<section class="page-heading"><div><h1>Evaluasi model</h1><p class="muted">Matriks kebingungan dan laporan klasifikasi per faktor, berdasarkan evaluasi holdout terakhir.</p></div><a class="button button-secondary" href="{{ url_for('training') }}">Training ulang</a></section>
 {% if rows %}
   {% for row in rows %}
     <section class="report-section">
@@ -9,13 +9,13 @@
       <p class="muted small">Training: {{ row.trained_at }}</p>
       {% if row.accuracy is not none %}<div class="metric-highlight"><strong>{{ "%.2f"|format(row.accuracy * 100) }}%</strong><span>Akurasi holdout</span></div>{% else %}<div class="notice notice-warning">Evaluasi holdout belum tersedia karena jumlah atau distribusi sampel belum mencukupi.</div>{% endif %}
       {% if row.confusion_json %}
-        <h3>Confusion matrix</h3>
+        <h3>Matriks kebingungan</h3>
         <p class="muted small">Baris = kelas aktual · Kolom = kelas prediksi</p>
         <div class="table-wrap"><table class="matrix-table"><thead><tr><th>Aktual \ Prediksi</th>{% for label in classes %}<th>{{ label }}</th>{% endfor %}</tr></thead><tbody>
         {% for matrix_row in row.confusion_json %}<tr><th>{{ classes[loop.index0] }}</th>{% for cell in matrix_row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
         </tbody></table></div>
       {% endif %}
-      {% if row.report_json and row.report_json.get('note') %}<p class="muted small">{{ row.report_json.note }}</p>{% elif row.report_json %}<h3>Classification report</h3><div class="table-wrap"><table><thead><tr><th>Kelas / metrik</th><th>Precision</th><th>Recall</th><th>F1-score</th><th>Support</th></tr></thead><tbody>{% for label in classes %}{% set item = row.report_json.get(label, {}) %}<tr><td>{{ label }}</td><td>{{ "%.3f"|format(item.get('precision', 0)) }}</td><td>{{ "%.3f"|format(item.get('recall', 0)) }}</td><td>{{ "%.3f"|format(item.get('f1-score', 0)) }}</td><td>{{ item.get('support', 0) }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+      {% if row.report_json and row.report_json.get('note') %}<p class="muted small">{{ row.report_json.note }}</p>{% elif row.report_json %}<h3>Laporan klasifikasi</h3><div class="table-wrap"><table><thead><tr><th>Kelas / metrik</th><th>Precision</th><th>Recall</th><th>F1-score</th><th>Support</th></tr></thead><tbody>{% for label in classes %}{% set item = row.report_json.get(label, {}) %}<tr><td>{{ label }}</td><td>{{ "%.3f"|format(item.get('precision', 0)) }}</td><td>{{ "%.3f"|format(item.get('recall', 0)) }}</td><td>{{ "%.3f"|format(item.get('f1-score', 0)) }}</td><td>{{ item.get('support', 0) }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
     </section>
   {% endfor %}
 {% else %}
