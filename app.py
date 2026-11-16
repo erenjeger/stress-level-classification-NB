@@ -1427,7 +1427,7 @@ def import_aggregate():
 @admin_required
 def export_aggregate_excel():
     source_filter = request.args.get("source", "all").strip().lower()
-    if source_filter not in ("all", "dataset", "form"):
+    if source_filter not in ("all", "dataset", "aggregate", "form"):
         source_filter = "all"
     department = request.args.get("department", "").strip()
     batch_id = request.args.get("batch_id", type=int)
@@ -1448,7 +1448,7 @@ def export_aggregate_excel():
             "Sumber data": item["source_type"],
             "Batch import": item.get("source_batch_id"),
             "Waktu pengisian": item["submitted_at"],
-            "Total 30 jawaban": item["total_score"],
+            "Total skor enam faktor": item["total_score"],
         }
         for factor in AGGREGATE_FACTOR_FIELDS:
             record[f"Skor {factor['name']}"] = item["scores"].get(factor["key"])
