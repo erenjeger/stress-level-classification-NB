@@ -17,7 +17,7 @@
         <span class="brand-mark" aria-hidden="true">S</span>
         <span class="brand-name">StressCheck</span>
         <span class="brand-divider" aria-hidden="true"></span>
-        <span class="brand-caption">Workforce insights</span>
+        <span class="brand-caption">Klasifikasi stres kerja</span>
       </a>
 
       <nav class="main-nav" aria-label="Navigasi utama">
@@ -25,8 +25,8 @@
            href="{{ url_for('home') }}" {% if request.endpoint == 'home' %}aria-current="page"{% endif %}>Kuesioner</a>
         {% if session.get('admin_id') %}
           <span class="nav-divider" aria-hidden="true"></span>
-          <a class="nav-link {% if request.endpoint == 'admin_dashboard' %}is-active{% endif %}"
-             href="{{ url_for('admin_dashboard') }}" {% if request.endpoint == 'admin_dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+          <a class="nav-link {% if request.endpoint in ['admin_dashboard', 'history'] %}is-active{% endif %}"
+             href="{{ url_for('admin_dashboard') }}" {% if request.endpoint in ['admin_dashboard', 'history'] %}aria-current="page"{% endif %}>Dashboard</a>
           <a class="nav-link {% if request.endpoint == 'training' %}is-active{% endif %}"
              href="{{ url_for('training') }}" {% if request.endpoint == 'training' %}aria-current="page"{% endif %}>Training model</a>
           <a class="nav-link {% if request.endpoint in ['import_aggregate', 'export_aggregate_excel'] %}is-active{% endif %}"
