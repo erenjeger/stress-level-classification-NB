@@ -2,37 +2,46 @@
 {% block title %}Hasil Kuesioner · StressCheck{% endblock %}
 {% block content %}
 <section class="result-intro">
-  <p class="eyebrow">PENGISIAN BERHASIL · #{{ submission_id }}</p>
+  <p class="eyebrow">SUBMISSION TERSIMPAN · #{{ submission_id }}</p>
   <h1>Terima kasih, {{ name }}.</h1>
-  <p class="hero-copy">Berikut ringkasan hasil pengolahan jawaban Anda berdasarkan enam faktor stres kerja.</p>
-  {% if department %}<p class="muted">Departemen: {{ department }}</p>{% endif %}
+  <p class="hero-copy">Berikut ringkasan pengolahan jawaban berdasarkan enam faktor stres kerja.</p>
+  {% if department %}<p class="result-department">Departemen <strong>{{ department }}</strong></p>{% endif %}
 </section>
 
 <div class="notice notice-info">
-  Hasil ini merupakan pengolahan kuesioner untuk kebutuhan penelitian, bukan diagnosis medis atau psikologis.
+  Hasil ini merupakan informasi pengolahan kuesioner untuk kebutuhan penelitian, bukan diagnosis medis atau psikologis.
+</div>
+
+<div class="result-section-heading">
+  <div><p class="eyebrow">RINGKASAN HASIL</p><h2>Kategori per faktor</h2></div>
+  <p class="muted small">Skor faktor dihitung dari lima pernyataan terkait.</p>
 </div>
 
 <div class="result-grid">
   {% for item in results %}
     <article class="result-card">
-      <div class="result-top"><span class="eyebrow">FAKTOR {{ "%02d"|format(loop.index) }}</span><span class="score-pill">{{ item.score }} / 35</span></div>
+      <div class="result-top">
+        <span class="eyebrow">FAKTOR {{ "%02d"|format(loop.index) }}</span>
+        <span class="score-pill">{{ item.score }} / 35</span>
+      </div>
       <h2>{{ item.name }}</h2>
-      <p class="result-class">{{ item.pred }}</p>
+      <p class="result-class {% if item.pred == 'Stres Berat' %}result-heavy{% elif item.pred == 'Stres Sedang' %}result-medium{% else %}result-light{% endif %}">{{ item.pred }}</p>
       <div class="result-meta"><span>Kategori aturan skor</span><strong>{{ item.rule }}</strong></div>
-      <div class="result-meta"><span>Metode</span><strong>{{ item.version }}</strong></div>
+      <div class="result-meta"><span>Metode pengolahan</span><strong>{{ item.version }}</strong></div>
       {% if item.probs %}
         <div class="probability-list">
+          <p class="probability-title">Probabilitas model</p>
           {% for label, probability in item.probs.items() %}
             <div class="probability-row"><span>{{ label }}</span><strong>{{ "%.2f"|format(probability) }}%</strong></div>
             <div class="progress-track"><span style="width: {{ probability }}%"></span></div>
           {% endfor %}
         </div>
       {% else %}
-        <p class="small muted">Model Naive Bayes belum tersedia. Kategori yang ditampilkan berasal dari aturan skor.</p>
+        <p class="small muted model-unavailable">Model Naive Bayes belum tersedia. Kategori yang ditampilkan menggunakan aturan skor.</p>
       {% endif %}
     </article>
   {% endfor %}
 </div>
 
-<div class="center-actions"><a class="button button-primary" href="{{ url_for('home') }}">Kembali ke halaman utama</a></div>
+<div class="center-actions"><a class="button button-primary" href="{{ url_for('home') }}">Kembali ke kuesioner</a></div>
 {% endblock %}
