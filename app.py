@@ -1257,7 +1257,7 @@ def get_submission_factor_rows(source_filter="all", department=None, batch_id=No
                         THEN 'Kategori turunan skor agregat'
                    WHEN fr.training_label IS NOT NULL THEN 'Label dataset'
                    WHEN fr.predicted_class IS NOT NULL
-                        AND fr.model_version LIKE '%Naive Bayes%' THEN 'Prediksi Naive Bayes'
+                        AND fr.model_version LIKE '%%Naive Bayes%%' THEN 'Prediksi Naive Bayes'
                    ELSE 'Aturan skor (fallback)'
                END AS category_basis
         FROM submissions s
