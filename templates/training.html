@@ -1,45 +1,59 @@
 {% extends "base.html" %}
 {% block title %}Training Model · StressCheck{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">DATASET IMPORT · MACHINE LEARNING</p><h1>Import data & training</h1><p class="muted">Unggah dataset responden. Sistem akan menyimpan setiap baris sebagai submission, lalu melatih enam model Categorical Naive Bayes.</p></div></section>
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">IMPORT REKAP PERUSAHAAN · MACHINE LEARNING</p>
+    <h1>Training dari skor faktor</h1>
+    <p class="muted">Unggah workbook rekap psikologi perusahaan. Sistem membaca enam skor faktor per responden dan melatih enam model Categorical Naive Bayes.</p>
+  </div>
+</section>
 
 <div class="notice notice-info">
-  <strong>Satu proses, dua hasil:</strong> upload di halaman ini (1) menambahkan data responden ke tabel submissions beserta 30 jawaban dan enam label training, lalu (2) melatih enam model Naive Bayes. Halaman Import Aggregate akan membaca submission yang sama untuk statistik.
+  <strong>Data rahasia tetap dihormati.</strong> Proses ini tidak memerlukan data jawaban 30 pertanyaan. Aplikasi menyimpan enam skor faktor yang tersedia pada workbook; aplikasi tidak merekonstruksi atau mengarang jawaban per butir.
 </div>
-<div class="notice notice-warning"><strong>Catatan metodologis.</strong> Label target harus berasal dari sumber yang dapat dipertanggungjawabkan. Jika label dibuat dari ambang skor yang sama, model akan belajar meniru aturan tersebut. Pastikan data jawaban benar-benar sesuai sumber penelitian sebelum dipakai menarik kesimpulan.</div>
+<div class="notice notice-warning">
+  <strong>Bagaimana kategori dan model dibuat?</strong>
+  File sumber berisi skor angka, bukan label kategori teks. Aplikasi membentuk target kategori per faktor memakai ambang yang saat ini digunakan: skor ≤ 9 = Stres Ringan, 10–24 = Stres Sedang, dan > 24 = Stres Berat. Setiap model memprediksi kategori satu faktor menggunakan kategori lima faktor lainnya sebagai fitur. Akurasi mengukur kesesuaian terhadap kategori turunan tersebut, bukan validasi independen atas instrumen atau bukti bahwa model lebih baik daripada aturan skor.
+</div>
 
 <section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">LANGKAH 01</p><h2>Siapkan dataset responden</h2></div><a class="button button-secondary" href="{{ url_for('training_template') }}">↓ Unduh template CSV</a></div>
-  <p class="muted">Satu baris mewakili satu responden. Kolom identitas bersifat opsional; bila tidak disediakan, aplikasi membuat identitas generik.</p>
-  <div class="table-wrap"><table><thead><tr><th>Jenis kolom</th><th>Nama kolom</th><th>Ketentuan</th></tr></thead><tbody>
-    <tr><td>Identitas opsional</td><td><code>employee_code</code>, <code>employee_name</code>, <code>department</code></td><td>Kode, nama, dan departemen responden</td></tr>
-    <tr><td>Jawaban</td><td><code>answer_1</code> – <code>answer_30</code></td><td>Bilangan bulat 1–7</td></tr>
-    {% for factor in factors %}<tr><td>Label target</td><td><code>{{ factor.label }}</code></td><td>Stres Ringan / Sedang / Berat</td></tr>{% endfor %}
+  <div class="section-heading"><div><p class="eyebrow">FORMAT WORKBOOK</p><h2>Kolom yang dibaca</h2></div></div>
+  <p class="muted">Aplikasi mencari header secara otomatis pada bagian awal sheet Excel, sehingga judul atau baris metadata di atas tabel diperbolehkan. Untuk workbook <strong>Psikologi 1(1).xlsx</strong>, header berada pada baris ke-4.</p>
+  <div class="table-wrap"><table><thead><tr><th>Jenis kolom</th><th>Nama pada workbook</th><th>Penggunaan</th></tr></thead><tbody>
+    <tr><td>Identitas</td><td><code>ID NUMBER</code>, <code>BAGIAN</code>, <code>Cek</code></td><td>Kode karyawan, departemen, dan nama jika tersedia</td></tr>
+    <tr><td>Skor faktor 1</td><td><code>Ketaksan Peran</code></td><td>Skor agregat Ketaksaan Peran</td></tr>
+    <tr><td>Skor faktor 2</td><td><code>Konflik Peran</code></td><td>Skor agregat Konflik Peran</td></tr>
+    <tr><td>Skor faktor 3</td><td><code>Beban Berlebih Kuantitatif</code></td><td>Skor agregat Beban Berlebih Kuantitatif</td></tr>
+    <tr><td>Skor faktor 4</td><td><code>Beban Berlebih Kualitatif</code></td><td>Skor agregat Beban Berlebih Kualitatif</td></tr>
+    <tr><td>Skor faktor 5</td><td><code>Pengembangan Karir</code></td><td>Skor agregat Pengembangan Karir</td></tr>
+    <tr><td>Skor faktor 6</td><td><code>Tanggung Jawab Kepada Orang Lain</code></td><td>Skor agregat Tanggung Jawab terhadap Orang Lain</td></tr>
+    <tr><td>Total (opsional)</td><td><code>Total</code></td><td>Jika tersedia, divalidasi terhadap jumlah enam skor faktor</td></tr>
   </tbody></table></div>
 </section>
 
 <section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">LANGKAH 02</p><h2>Import submission dan training model</h2></div></div>
+  <div class="section-heading"><div><p class="eyebrow">UPLOAD DAN TRAINING</p><h2>Unggah workbook rekap</h2></div></div>
   <form method="post" enctype="multipart/form-data" class="upload-zone">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="file-picker"><span class="file-icon">↑</span><strong>Pilih file dataset</strong><span class="muted small">Format .xlsx, .xls, atau .csv · Maksimal 10 MB</span><input type="file" name="dataset" accept=".xlsx,.xls,.csv" required></label>
-    <button class="button button-primary button-large" type="submit">Import submission & training 6 model</button>
+    <label class="file-picker"><span class="file-icon">↑</span><strong>Pilih file Excel rekap faktor</strong><span class="muted small">Format .xlsx atau .xls · Maksimal 10 MB</span><input type="file" name="dataset" accept=".xlsx,.xls,.csv" required></label>
+    <button class="button button-primary button-large" type="submit">Import rekap & training 6 model Naive Bayes</button>
   </form>
-  <p class="small muted">Setiap file yang sama hanya dapat diimpor satu kali untuk mencegah submission ganda. Setiap baris dibuat sebagai satu submission baru.</p>
+  <p class="small muted">Satu baris workbook diproses sebagai satu submission dengan enam skor faktor. File identik yang sudah pernah diimpor akan ditolak untuk mencegah duplikasi. Format dataset jawaban mentah lama tetap dapat diproses sebagai kompatibilitas, tetapi tidak diperlukan untuk workbook rekap faktor.</p>
 </section>
 
 <section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">LANGKAH 03</p><h2>Riwayat dataset yang pernah diimpor</h2></div><a class="text-link" href="{{ url_for('import_aggregate', source='dataset') }}">Lihat analisis submission →</a></div>
+  <div class="section-heading"><div><p class="eyebrow">RIWAYAT IMPORT</p><h2>Workbook dan dataset yang pernah diimpor</h2></div><a class="text-link" href="{{ url_for('import_aggregate') }}">Lihat analisis submission →</a></div>
   {% if batches %}
-    <div class="table-wrap"><table><thead><tr><th>Batch</th><th>File</th><th>Submission</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead><tbody>
-      {% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_filename }}</td><td>{{ batch.total_records }}</td><td>{{ batch.imported_by or '—' }}</td><td>{{ batch.imported_at }}</td></tr>{% endfor %}
+    <div class="table-wrap"><table><thead><tr><th>Batch</th><th>File</th><th>Jenis data</th><th>Responden</th><th>Diimpor oleh</th><th>Waktu</th></tr></thead><tbody>
+      {% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_filename }}</td><td>{% if batch.import_type == 'aggregate_factor_scores' %}Rekap skor faktor{% else %}Jawaban item{% endif %}</td><td>{{ batch.total_records }}</td><td>{{ batch.imported_by or '—' }}</td><td>{{ batch.imported_at }}</td></tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<div class="empty-state">Belum ada dataset yang diimpor.</div>{% endif %}
+  {% else %}<div class="empty-state">Belum ada file yang diimpor.</div>{% endif %}
 </section>
 
 <section class="panel section-panel">
-  <div class="section-heading"><div><p class="eyebrow">OUTPUT MODEL</p><h2>Enam model yang akan dilatih</h2></div></div>
+  <div class="section-heading"><div><p class="eyebrow">OUTPUT MODEL</p><h2>Enam model per faktor</h2></div></div>
   <div class="factor-grid">{% for factor in factors %}<div class="factor-chip"><span>0{{ loop.index }}</span>{{ factor.name }}</div>{% endfor %}</div>
-  <p class="small muted">Evaluasi holdout stratified dihitung jika ukuran dan distribusi kelas mencukupi. Training label disimpan terpisah dari prediksi model.</p>
+  <p class="small muted">Untuk workbook rekap, fitur sebuah model adalah kategori lima faktor lainnya yang sudah diturunkan dari skor. Jawaban 30 item tidak disimpan karena memang tidak tersedia dari sumber penelitian.</p>
 </section>
 {% endblock %}
