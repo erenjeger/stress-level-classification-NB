@@ -1,21 +1,56 @@
 {% extends "base.html" %}
 {% block title %}Hasil Import & Training · StressCheck{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">IMPORT DAN TRAINING SELESAI</p><h1>Dataset berhasil diproses</h1><p class="muted">Submission historis sudah tersimpan dan enam model Naive Bayes telah dilatih.</p></div><a class="button button-secondary" href="{{ url_for('confusion') }}">Lihat evaluasi →</a></section>
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">IMPORT DAN TRAINING SELESAI</p>
+    <h1>{% if import_mode == 'aggregate' %}Rekap skor faktor berhasil diproses{% else %}Dataset berhasil diproses{% endif %}</h1>
+    <p class="muted">Sebanyak {{ imported_count }} responden telah tersimpan dan enam model Categorical Naive Bayes telah dilatih.</p>
+  </div>
+  <a class="button button-secondary" href="{{ url_for('confusion') }}">Lihat evaluasi →</a>
+</section>
+
 <div class="stats-grid">
-  <article class="stat-card"><span class="stat-label">Submission baru</span><strong>{{ imported_count }}</strong><span class="stat-foot">Responden dimasukkan ke database</span></article>
+  <article class="stat-card"><span class="stat-label">Responden diimpor</span><strong>{{ imported_count }}</strong><span class="stat-foot">Satu baris sumber menjadi satu submission</span></article>
   <article class="stat-card"><span class="stat-label">Batch import</span><strong>#{{ batch_id }}</strong><span class="stat-foot">ID batch dataset</span></article>
   <article class="stat-card"><span class="stat-label">Model dilatih</span><strong>6</strong><span class="stat-foot">Satu model untuk setiap faktor</span></article>
 </div>
+
+<div class="notice notice-info">
+  <strong>Metode training.</strong> {{ method_note }}<br>
+  <strong>Fitur model.</strong> {{ feature_note }}
+</div>
+
+{% if warnings %}
+<div class="notice notice-warning"><strong>Catatan kualitas data dari workbook:</strong><ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul></div>
+{% endif %}
+
 <div class="panel section-panel">
   <div class="section-heading"><div><p class="eyebrow">HASIL EVALUASI</p><h2>Ringkasan enam model</h2></div></div>
-  <div class="table-wrap"><table><thead><tr><th>Faktor</th><th>Jumlah sampel</th><th>Akurasi holdout</th></tr></thead><tbody>
-  {% for item in summaries %}<tr><td><strong>{{ item.factor }}</strong></td><td>{{ item.samples }}</td><td>{% if item.accuracy is not none %}{{ "%.2f"|format(item.accuracy) }}%{% else %}<span class="muted">Belum cukup data untuk evaluasi</span>{% endif %}</td></tr>{% endfor %}
+  <div class="table-wrap"><table><thead><tr><th>Faktor</th><th>Jumlah sampel</th><th>Ringan</th><th>Sedang</th><th>Berat</th><th>Akurasi holdout</th></tr></thead><tbody>
+  {% for item in summaries %}
+    <tr>
+      <td><strong>{{ item.factor }}</strong></td>
+      <td>{{ item.samples }}</td>
+      <td>{{ item.class_counts.get('Stres Ringan', 0) }}</td>
+      <td>{{ item.class_counts.get('Stres Sedang', 0) }}</td>
+      <td>{{ item.class_counts.get('Stres Berat', 0) }}</td>
+      <td>{% if item.accuracy is not none %}{{ "%.2f"|format(item.accuracy) }}%{% else %}<span class="muted">Belum cukup data untuk evaluasi</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
   </tbody></table></div>
 </div>
-<div class="notice notice-info">Data target yang diimpor disimpan pada <code>training_label</code>. Kolom <code>predicted_class</code> tetap kosong untuk submission training karena belum merupakan prediksi terhadap data baru. Akurasi dihitung pada split evaluasi holdout.</div>
+
+{% if import_mode == 'aggregate' %}
+<div class="notice notice-warning">
+  <strong>Batasan metodologis.</strong> Kategori target dihitung dari skor faktor dengan ambang yang sudah ditampilkan pada halaman training. Karena target berasal dari aturan skor, akurasi holdout hanya menunjukkan kemampuan model mempelajari pola hubungan kategori antarfaktor pada dataset ini. Akurasi tersebut tidak boleh ditafsirkan sebagai validasi independen atau bukti bahwa prediksi Naive Bayes menggantikan penilaian berdasarkan skor faktor.
+</div>
+{% else %}
+<div class="notice notice-info">Label target dari dataset disimpan di <code>training_label</code>. Kolom <code>predicted_class</code> tetap kosong untuk submission training karena baris tersebut adalah data pelatihan, bukan prediksi terhadap responden baru.</div>
+{% endif %}
+
 <div class="form-footer">
   <a class="button button-secondary" href="{{ url_for('training') }}">Kembali ke Training</a>
-  <a class="button button-primary" href="{{ url_for('import_aggregate', source='dataset', batch_id=batch_id) }}">Lihat statistik submission batch ini →</a>
+  <a class="button button-primary" href="{{ url_for('import_aggregate', source='{{ 'aggregate' if import_mode == 'aggregate' else 'dataset' }}', batch_id=batch_id) }}">Lihat statistik submission batch ini →</a>
 </div>
 {% endblock %}
