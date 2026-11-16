@@ -49,7 +49,7 @@
   <article class="stat-card"><span class="stat-label">Departemen</span><strong>{{ report.departments|length }}</strong><span class="stat-foot">Setelah filter diterapkan</span></article>
 </section>
 
-<section class="panel section-panel aggregate-section">
+<section class="report-section aggregate-section">
   <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Rentang teoritis 5–35</span></div>
   <div class="factor-average-list">{% for factor in report.factors %}
     <div class="factor-average-item"><div class="factor-average-head"><strong>{{ factor.name }}</strong><span><b>{{ factor.average }}</b> / 35</span></div>
@@ -59,7 +59,7 @@
   {% endfor %}</div>
 </section>
 
-<section class="panel section-panel aggregate-section">
+<section class="report-section aggregate-section">
   <div class="section-heading"><div><p class="eyebrow">DISTRIBUSI KATEGORI</p><h2>Kategori per faktor</h2></div><span class="muted small">Sesuai sumber kategori di atas</span></div>
   <div class="distribution-analysis">{% for factor in report.factors %}
     <div class="distribution-analysis-item">
@@ -80,14 +80,14 @@
   {% endfor %}</div>
 </section>
 
-<section class="panel section-panel aggregate-section">
+<section class="report-section aggregate-section">
   <div class="section-heading"><div><p class="eyebrow">PERBANDINGAN DEPARTEMEN</p><h2>Skor berdasarkan departemen</h2></div><span class="muted small">{{ report.departments|length }} departemen</span></div>
   {% if report.departments %}<div class="table-wrap"><table><thead><tr><th>Departemen</th><th>Submission</th><th>Rata-rata total</th>{% for factor in report.factors %}<th>{{ factor.name }}</th>{% endfor %}</tr></thead><tbody>
     {% for department in report.departments %}<tr><td><strong>{{ department.name }}</strong></td><td>{{ department.count }}</td><td>{{ department.average_total }}</td>{% for factor in report.factors %}<td>{{ department.averages[factor.key] }}</td>{% endfor %}</tr>{% endfor %}
   </tbody></table></div>{% else %}<div class="empty-state">Belum ada data departemen pada filter ini.</div>{% endif %}
 </section>
 
-<section class="panel section-panel aggregate-section">
+<section class="report-section aggregate-section">
   <div class="section-heading"><div><p class="eyebrow">DETAIL RESPONDEN</p><h2>Data submission</h2></div><span class="muted small">Menampilkan {{ rows|length }} dari {{ total_filtered }} submission</span></div>
   {% if rows %}<div class="table-wrap"><table class="aggregate-detail-table">
     <thead><tr><th>Submission</th><th>Responden</th><th>Kode</th><th>Departemen</th><th>Sumber</th><th>Batch</th><th>Ketaksaan</th><th>Konflik</th><th>Beban Kuantitatif</th><th>Beban Kualitatif</th><th>Karir</th><th>Tanggung Jawab</th><th>Total</th></tr></thead>
