@@ -1244,6 +1244,8 @@ def get_submission_factor_rows(source_filter="all", department=None, batch_id=No
                fr.rule_class, fr.training_label, fr.predicted_class, fr.model_version,
                COALESCE(fr.training_label, fr.predicted_class, fr.rule_class) AS category_label,
                CASE
+                   WHEN fr.training_label IS NOT NULL AND s.source_type='aggregate'
+                        THEN 'Kategori turunan skor agregat'
                    WHEN fr.training_label IS NOT NULL THEN 'Label dataset'
                    WHEN fr.predicted_class IS NOT NULL
                         AND fr.model_version LIKE '%Naive Bayes%' THEN 'Prediksi Naive Bayes'
@@ -1255,7 +1257,7 @@ def get_submission_factor_rows(source_filter="all", department=None, batch_id=No
         WHERE 1=1
     """
     params = []
-    if source_filter in ("dataset", "form"):
+    if source_filter in ("dataset", "aggregate", "form"):
         query += " AND s.source_type=%s"
         params.append(source_filter)
     if department:
@@ -1280,6 +1282,7 @@ def build_submission_aggregate_report(factor_rows):
         scores = [int(row["factor_score"]) for row in subset]
         class_counts = {label: 0 for label in CLASSES}
         basis_counts = {
+            "Kategori turunan skor agregat": 0,
             "Label dataset": 0,
             "Prediksi Naive Bayes": 0,
             "Aturan skor (fallback)": 0,
@@ -1365,7 +1368,7 @@ def build_submission_aggregate_report(factor_rows):
 def import_aggregate():
     """Dashboard statistik berdasarkan submissions dan factor_results."""
     source_filter = request.args.get("source", "all").strip().lower()
-    if source_filter not in ("all", "dataset", "form"):
+    if source_filter not in ("all", "dataset", "aggregate", "form"):
         source_filter = "all"
     department_filter = request.args.get("department", "").strip()
     batch_id = request.args.get("batch_id", type=int)
@@ -1380,7 +1383,7 @@ def import_aggregate():
             """)
             departments = [row["department"] for row in cur.fetchall()]
             cur.execute("""
-                SELECT id, source_filename, total_records, imported_by, imported_at
+                SELECT id, source_filename, total_records, import_type, imported_by, imported_at
                 FROM dataset_import_batches ORDER BY id DESC LIMIT 50
             """)
             batches = cur.fetchall()
