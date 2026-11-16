@@ -518,12 +518,12 @@ td strong { color: var(--ink); }
   .container { width: calc(100% - 28px); }
   .page { padding-top: 25px; padding-bottom: 42px; }
   .hero { align-items: flex-start; flex-direction: column; gap: 17px; padding-top: 8px; }
-  .hero-stat { min-width: 0; }
+  .hero-facts { gap: 16px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 13px; margin-bottom: 19px; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .stats-grid, .aggregate-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid, .result-grid, .distribution-list, .factor-average-list, .distribution-analysis { grid-template-columns: 1fr; }
-  .questionnaire { padding: 17px; }
+  .questionnaire { padding: 0; }
   .section-panel, .aggregate-section { padding: 17px; }
   .form-footer { align-items: stretch; flex-direction: column; gap: 13px; }
   .form-footer .button { width: 100%; }
@@ -547,7 +547,7 @@ td strong { color: var(--ink); }
   .scale-legend { gap: 7px 11px; }
   .rating-options { gap: 4px; margin-left: 0; }
   .factor-hint { margin-left: 0; }
-  .question-card { padding: 13px 10px 11px; }
+  .question-card { padding: 13px 0 11px; }
   .question-card legend { font-size: .82rem; }
   .rating-option span { height: 34px; }
   .answer-row { grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 8px; }
