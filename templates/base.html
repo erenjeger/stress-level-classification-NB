@@ -3,33 +3,49 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Sistem klasifikasi tingkat stres kerja karyawan">
+  <meta name="description" content="StressCheck — pengolahan data dan klasifikasi faktor stres kerja karyawan.">
+  <meta name="theme-color" content="#f4f6f7">
   <title>{% block title %}StressCheck{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Lewati ke konten utama</a>
+
   <header class="topbar">
     <div class="container nav-wrap">
-      <a class="brand" href="{{ url_for('home') }}"><span class="brand-mark">S</span><span>StressCheck</span></a>
+      <a class="brand" href="{{ url_for('home') }}" aria-label="StressCheck, halaman utama">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span class="brand-name">StressCheck</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-caption">Workforce insights</span>
+      </a>
+
       <nav class="main-nav" aria-label="Navigasi utama">
-        <a href="{{ url_for('home') }}">Kuesioner</a>
+        <a class="nav-link {% if request.endpoint == 'home' %}is-active{% endif %}"
+           href="{{ url_for('home') }}" {% if request.endpoint == 'home' %}aria-current="page"{% endif %}>Kuesioner</a>
         {% if session.get('admin_id') %}
-          <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
-          <a href="{{ url_for('training') }}">Training Model</a>
-          <a href="{{ url_for('import_aggregate') }}">Analisis Submission</a>
-          <a href="{{ url_for('confusion') }}">Evaluasi</a>
+          <span class="nav-divider" aria-hidden="true"></span>
+          <a class="nav-link {% if request.endpoint == 'admin_dashboard' %}is-active{% endif %}"
+             href="{{ url_for('admin_dashboard') }}" {% if request.endpoint == 'admin_dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+          <a class="nav-link {% if request.endpoint == 'training' %}is-active{% endif %}"
+             href="{{ url_for('training') }}" {% if request.endpoint == 'training' %}aria-current="page"{% endif %}>Training model</a>
+          <a class="nav-link {% if request.endpoint in ['import_aggregate', 'export_aggregate_excel'] %}is-active{% endif %}"
+             href="{{ url_for('import_aggregate') }}" {% if request.endpoint in ['import_aggregate', 'export_aggregate_excel'] %}aria-current="page"{% endif %}>Analisis data</a>
+          <a class="nav-link {% if request.endpoint == 'confusion' %}is-active{% endif %}"
+             href="{{ url_for('confusion') }}" {% if request.endpoint == 'confusion' %}aria-current="page"{% endif %}>Evaluasi</a>
           <form method="post" action="{{ url_for('admin_logout') }}" class="inline-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="nav-button" type="submit">Keluar</button>
           </form>
         {% else %}
-          <a href="{{ url_for('admin_login') }}">Admin</a>
+          <a class="nav-link nav-admin {% if request.endpoint == 'admin_login' %}is-active{% endif %}"
+             href="{{ url_for('admin_login') }}" {% if request.endpoint == 'admin_login' %}aria-current="page"{% endif %}>Admin</a>
         {% endif %}
       </nav>
     </div>
   </header>
 
-  <main class="container page">
+  <main id="main-content" class="container page">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-stack" role="status" aria-live="polite">
@@ -43,7 +59,10 @@
   </main>
 
   <footer class="footer">
-    <div class="container">StressCheck · Sistem klasifikasi untuk kebutuhan pengolahan kuesioner dan penelitian.</div>
+    <div class="container footer-inner">
+      <span>StressCheck</span>
+      <span>Pengolahan data stres kerja karyawan</span>
+    </div>
   </footer>
 </body>
 </html>
