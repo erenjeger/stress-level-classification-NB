@@ -4,52 +4,66 @@
 <section class="hero">
   <div>
     <p class="eyebrow">KUESIONER KARYAWAN</p>
-    <h1>Kenali faktor stres dalam pekerjaan Anda.</h1>
-    <p class="hero-copy">Lengkapi 30 pernyataan berikut berdasarkan pengalaman kerja Anda. Tidak ada jawaban benar atau salah.</p>
+    <h1>Faktor stres dalam pekerjaan</h1>
+    <p class="hero-copy">Jawab 30 pernyataan berdasarkan pengalaman kerja Anda. Pilih jawaban yang paling sesuai; tidak ada jawaban benar atau salah.</p>
   </div>
-  <div class="hero-stat"><strong>30</strong><span>Pernyataan</span><strong>6</strong><span>Faktor kerja</span></div>
+  <ul class="hero-facts" aria-label="Informasi kuesioner">
+    <li><strong>30</strong><span>pernyataan</span></li>
+    <li><strong>6</strong><span>faktor kerja</span></li>
+  </ul>
 </section>
 
-<form method="post" action="{{ url_for('submit') }}" class="panel questionnaire">
+<form method="post" action="{{ url_for('submit') }}" class="questionnaire" id="questionnaire-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <div class="section-heading">
-    <div><p class="eyebrow">BAGIAN 01</p><h2>Informasi karyawan</h2></div>
-    <span class="muted small">Tidak perlu membuat akun</span>
-  </div>
-  <div class="form-grid">
-    <label class="field"><span>Nama karyawan <b class="required">*</b></span><input name="employee_name" maxlength="150" required placeholder="Masukkan nama"></label>
-    <label class="field"><span>Departemen</span><input name="department" maxlength="150" placeholder="Contoh: Operasional"></label>
-  </div>
 
-  <div class="section-heading question-heading">
-    <div><p class="eyebrow">BAGIAN 02</p><h2>Pernyataan kuesioner</h2></div>
-    <span class="muted small">Pilih satu jawaban per pernyataan</span>
-  </div>
-  <div class="scale-legend">
-    <span><b>1</b> Sangat Tidak Setuju</span>
-    <span><b>4</b> Netral</span>
-    <span><b>7</b> Sangat Setuju</span>
-  </div>
+  <section class="questionnaire-section" aria-labelledby="employee-info-title">
+    <div class="section-heading">
+      <div><p class="eyebrow">INFORMASI</p><h2 id="employee-info-title">Data karyawan</h2></div>
+      <span class="muted small">Tidak perlu membuat akun</span>
+    </div>
+    <div class="form-grid">
+      <label class="field">
+        <span>Nama karyawan <b class="required">*</b></span>
+        <input name="employee_name" maxlength="150" autocomplete="name" required placeholder="Nama lengkap">
+      </label>
+      <label class="field">
+        <span>Departemen</span>
+        <input name="department" maxlength="150" placeholder="Nama departemen">
+      </label>
+    </div>
+  </section>
 
-  {% for question in questions %}
-    {% set qno = loop.index %}
-    <fieldset class="question-card">
-      <legend><span class="question-number">{{ "%02d"|format(qno) }}</span><span>{{ question }}</span></legend>
-      <div class="factor-hint">{{ question_factor[qno] }}</div>
-      <div class="rating-options">
-        {% for value in range(1, 8) %}
-          <label class="rating-option">
-            <input type="radio" name="q{{ qno }}" value="{{ value }}" required>
-            <span>{{ value }}</span>
-          </label>
-        {% endfor %}
-      </div>
-    </fieldset>
-  {% endfor %}
+  <section class="questionnaire-section" aria-labelledby="questions-title">
+    <div class="section-heading question-heading">
+      <div><p class="eyebrow">PERNYATAAN</p><h2 id="questions-title">Pilih tingkat persetujuan</h2></div>
+      <span class="muted small">Satu jawaban untuk setiap pernyataan</span>
+    </div>
+    <div class="scale-legend" aria-label="Skala jawaban">
+      <span><b>1</b> Sangat tidak setuju</span>
+      <span><b>4</b> Netral</span>
+      <span><b>7</b> Sangat setuju</span>
+    </div>
+
+    {% for question in questions %}
+      {% set qno = loop.index %}
+      <fieldset class="question-card">
+        <legend><span class="question-number">{{ "%02d"|format(qno) }}</span><span>{{ question }}</span></legend>
+        <div class="factor-hint">{{ question_factor[qno] }}</div>
+        <div class="rating-options" role="group" aria-label="Jawaban untuk pernyataan {{ qno }}">
+          {% for value in range(1, 8) %}
+            <label class="rating-option">
+              <input type="radio" name="q{{ qno }}" value="{{ value }}" required>
+              <span>{{ value }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    {% endfor %}
+  </section>
 
   <div class="form-footer">
-    <p class="muted small">Dengan mengirim formulir, Anda menyatakan bahwa jawaban telah diisi sesuai pengalaman Anda.</p>
-    <button class="button button-primary button-large" type="submit">Kirim jawaban <span aria-hidden="true">→</span></button>
+    <p class="muted small">Dengan mengirim formulir, Anda menyatakan jawaban telah diisi sesuai pengalaman Anda.</p>
+    <button class="button button-primary button-large" type="submit">Kirim jawaban</button>
   </div>
 </form>
 {% endblock %}
