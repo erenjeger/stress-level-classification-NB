@@ -3,7 +3,7 @@
   color-scheme: light;
   --ink: #1d2935;
   --ink-soft: #354454;
-  --muted: #687786;
+  --muted: #5d6b78;
   --muted-strong: #526272;
   --line: #dfe5e8;
   --line-strong: #cbd5da;
@@ -89,8 +89,7 @@ code {
   z-index: 20;
   top: 0;
   border-bottom: 1px solid var(--line);
-  background: rgba(255,255,255,.96);
-  backdrop-filter: blur(12px);
+  background: #fff;
 }
 .nav-wrap {
   min-height: 68px;
