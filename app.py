@@ -6,6 +6,8 @@ import hashlib
 import logging
 import math
 import os
+import re
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from functools import wraps
@@ -137,6 +139,7 @@ def init_db():
             source_sha256 CHAR(64) NOT NULL,
             total_records INTEGER NOT NULL,
             imported_by VARCHAR(80) NULL,
+            import_type VARCHAR(40) NOT NULL DEFAULT 'raw_item_answers',
             imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uq_dataset_sha256 (source_sha256)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -251,6 +254,7 @@ def init_db():
                     ("submissions", "source_type", "ALTER TABLE submissions ADD COLUMN source_type VARCHAR(20) NOT NULL DEFAULT 'form'"),
                     ("submissions", "source_batch_id", "ALTER TABLE submissions ADD COLUMN source_batch_id BIGINT NULL"),
                     ("factor_results", "training_label", "ALTER TABLE factor_results ADD COLUMN training_label VARCHAR(30) NULL"),
+                    ("dataset_import_batches", "import_type", "ALTER TABLE dataset_import_batches ADD COLUMN import_type VARCHAR(40) NOT NULL DEFAULT 'raw_item_answers'"),
                 ]
                 for table_name, column_name, alter_sql in migrations:
                     cur.execute(f"SHOW COLUMNS FROM {table_name} LIKE %s", (column_name,))
@@ -330,23 +334,220 @@ def load_model(factor: dict):
         return None
 
 
-def predict_factor(factor: dict, answers: dict):
+def category_code(label: str) -> int:
+    """Encode kategori stres menjadi fitur kategorikal 0, 1, atau 2."""
+    return CLASSES.index(label)
+
+
+def normalize_aggregate_header(value) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii").lower()
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+AGGREGATE_HEADER_ALIASES = {
+    "idnumber": "employee_code",
+    "idkaryawan": "employee_code",
+    "kodekaryawan": "employee_code",
+    "bagian": "department",
+    "departemen": "department",
+    "department": "department",
+    "cek": "employee_name",
+    "nama": "employee_name",
+    "namakaryawan": "employee_name",
+    "no": "source_no",
+    "nomor": "source_no",
+    "total": "source_total",
+    "ketaksanperan": "ketaksaan_peran",
+    "ketaksaanperan": "ketaksaan_peran",
+    "konflikperan": "konflik_peran",
+    "bebanberlebihkuantitatif": "beban_kuantitatif",
+    "bebanberlebihkualitatif": "beban_kualitatif",
+    "pengembangankarir": "pengembangan_karir",
+    "tanggungjawabkepad aoranglain": "tanggung_jawab",
+    "tanggungjawabkepadaoranglain": "tanggung_jawab",
+    "tanggungjawabterhadaporanglain": "tanggung_jawab",
+    "tanggungjawab": "tanggung_jawab",
+}
+
+
+def read_factor_aggregate_workbook(path: Path):
+    """Detect and read the source workbook containing six aggregate factor scores."""
+    try:
+        workbook = pd.ExcelFile(path)
+    except Exception:
+        return None
+
+    required_factors = [factor["key"] for factor in FACTORS]
+    for sheet_name in workbook.sheet_names:
+        raw = pd.read_excel(path, sheet_name=sheet_name, header=None, dtype=object)
+        header_index = None
+        header_map = {}
+        for row_index in range(min(len(raw), 15)):
+            candidate = {}
+            for column_index, value in enumerate(raw.iloc[row_index].tolist()):
+                if pd.isna(value):
+                    continue
+                canonical = AGGREGATE_HEADER_ALIASES.get(normalize_aggregate_header(value))
+                if canonical and canonical not in candidate:
+                    candidate[canonical] = column_index
+            if all(key in candidate for key in required_factors):
+                header_index = row_index
+                header_map = candidate
+                break
+
+        if header_index is None:
+            continue
+
+        records = raw.iloc[header_index + 1:].copy()
+        columns = raw.iloc[header_index].tolist()
+        records.columns = [
+            str(value).strip() if not pd.isna(value) else f"kolom_{index}"
+            for index, value in enumerate(columns)
+        ]
+        selected = {}
+        for canonical, column_index in header_map.items():
+            if canonical in required_factors or canonical in {
+                "employee_code", "employee_name", "department", "source_total", "source_no"
+            }:
+                selected[canonical] = records.iloc[:, column_index]
+        dataframe = pd.DataFrame(selected)
+        dataframe = dataframe.dropna(subset=required_factors, how="all")
+        if not dataframe.empty:
+            dataframe.reset_index(drop=True, inplace=True)
+            return dataframe
+
+    return None
+
+
+def clean_optional_text(value):
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "#name?", "#n/a"}:
+        return None
+    if re.fullmatch(r"\d+\.0", text):
+        text = text[:-2]
+    return text
+
+
+def prepare_aggregate_dataframe(dataframe: pd.DataFrame):
+    """Validate six factor scores and derive categories without fabricating item answers."""
+    dataframe = dataframe.copy()
+    factor_keys = [factor["key"] for factor in FACTORS]
+    if dataframe.empty:
+        raise ValueError("Workbook tidak memiliki baris responden.")
+
+    missing = [key for key in factor_keys if key not in dataframe.columns]
+    if missing:
+        raise ValueError("Kolom skor faktor tidak ditemukan: " + ", ".join(missing))
+
+    for factor in FACTORS:
+        key = factor["key"]
+        numeric = pd.to_numeric(dataframe[key], errors="coerce")
+        if numeric.isna().any() or not np.equal(
+            numeric.to_numpy(dtype=float), np.floor(numeric.to_numpy(dtype=float))
+        ).all():
+            raise ValueError(f"Skor faktor {factor['name']} harus berupa bilangan bulat dan tidak boleh kosong.")
+        if not numeric.between(0, 35).all():
+            raise ValueError(f"Skor faktor {factor['name']} harus berada pada rentang 0–35.")
+        dataframe[key] = numeric.astype(int)
+
+    for column in ("employee_code", "employee_name", "department"):
+        if column not in dataframe.columns:
+            dataframe[column] = None
+        dataframe[column] = dataframe[column].apply(clean_optional_text)
+
+    dataframe["employee_name"] = dataframe["employee_name"].where(
+        dataframe["employee_name"].notna(),
+        [f"Responden {index + 1:03d}" for index in range(len(dataframe))],
+    )
+    dataframe["total_score"] = dataframe[factor_keys].sum(axis=1)
+
+    warnings = []
+    below_minimum = int((dataframe[factor_keys] < 5).sum().sum())
+    if below_minimum:
+        warnings.append(
+            f"Ada {below_minimum} nilai skor faktor di bawah 5. Nilai sumber dipertahankan apa adanya dan tidak direkonstruksi."
+        )
+
+    if "source_total" in dataframe.columns:
+        source_total = pd.to_numeric(dataframe["source_total"], errors="coerce")
+        mismatches = source_total.notna() & (source_total != dataframe["total_score"])
+        if mismatches.any():
+            rows = (np.flatnonzero(mismatches.to_numpy()) + 1).tolist()[:10]
+            raise ValueError(
+                "Kolom Total tidak sama dengan penjumlahan enam skor faktor pada baris responden "
+                + ", ".join(map(str, rows))
+                + ". Periksa workbook sumber."
+            )
+
+    employee_codes = dataframe["employee_code"].dropna()
+    duplicate_count = int(employee_codes.duplicated(keep=False).sum())
+    if duplicate_count:
+        warnings.append(
+            f"Ditemukan {duplicate_count} baris dengan kode karyawan duplikat. Baris sumber tetap diproses terpisah dan tidak dihapus."
+        )
+
+    # Kategori target diturunkan dari skor faktor memakai ambang yang telah dipakai aplikasi.
+    for factor in FACTORS:
+        dataframe[factor["label"]] = dataframe[factor["key"]].apply(rule_class)
+
+    for factor in FACTORS:
+        labels = dataframe[factor["label"]]
+        if labels.nunique() < 2:
+            raise ValueError(
+                f"{factor['name']}: hanya ditemukan satu kategori. Naive Bayes membutuhkan minimal dua kelas target."
+            )
+        missing_classes = [label for label in CLASSES if label not in set(labels)]
+        if missing_classes:
+            warnings.append(
+                f"{factor['name']}: kategori {', '.join(missing_classes)} tidak ditemukan pada data training."
+            )
+
+    return dataframe, warnings
+
+
+def predict_factor(factor: dict, answers: dict, factor_scores: dict | None = None):
     score = sum(answers[q] for q in factor["questions"])
-    model = load_model(factor)
-    if model is None:
+    model_bundle = load_model(factor)
+    if model_bundle is None:
         # Fallback ini adalah aturan skor, bukan prediksi Naive Bayes.
         return score, rule_class(score), None, None, "Aturan skor (model belum tersedia)"
 
-    features = np.array(
-        [[answers[q] - 1 for q in factor["questions"]]],
-        dtype=int,
-    )
-    predicted = str(model.predict(features)[0])
+    if isinstance(model_bundle, dict) and "estimator" in model_bundle:
+        estimator = model_bundle["estimator"]
+        feature_type = model_bundle.get("feature_type", "raw_answers")
+        if feature_type == "factor_category_codes":
+            current_scores = factor_scores or {
+                item["key"]: sum(answers[q] for q in item["questions"])
+                for item in FACTORS
+            }
+            feature_keys = model_bundle.get("feature_factor_keys", [])
+            features = np.array([[
+                category_code(rule_class(int(current_scores[key])))
+                for key in feature_keys
+            ]], dtype=int)
+            method = "Categorical Naive Bayes (kategori lima faktor lain)"
+        else:
+            questions = model_bundle.get("feature_question_numbers", factor["questions"])
+            features = np.array([[answers[q] - 1 for q in questions]], dtype=int)
+            method = "Categorical Naive Bayes (jawaban item)"
+    else:
+        # Backward compatibility untuk model joblib versi sebelumnya.
+        estimator = model_bundle
+        features = np.array(
+            [[answers[q] - 1 for q in factor["questions"]]],
+            dtype=int,
+        )
+        method = "Categorical Naive Bayes (model versi lama)"
+
+    predicted = str(estimator.predict(features)[0])
     probabilities = {
         str(label): round(float(probability) * 100, 2)
-        for label, probability in zip(model.classes_, model.predict_proba(features)[0])
+        for label, probability in zip(estimator.classes_, estimator.predict_proba(features)[0])
     }
-    return score, rule_class(score), predicted, probabilities, "Categorical Naive Bayes"
+    return score, rule_class(score), predicted, probabilities, method
 
 
 @app.context_processor
@@ -389,9 +590,15 @@ def submit():
         flash("Semua 30 pertanyaan wajib dijawab dengan angka 1 sampai 7.", "danger")
         return redirect(url_for("home"))
 
+    factor_scores = {
+        factor["key"]: sum(answers[q] for q in factor["questions"])
+        for factor in FACTORS
+    }
     outputs = []
     for factor in FACTORS:
-        score, rule, predicted, probabilities, version = predict_factor(factor, answers)
+        score, rule, predicted, probabilities, version = predict_factor(
+            factor, answers, factor_scores
+        )
         outputs.append((factor, score, rule, predicted, probabilities, version))
 
     conn = None
@@ -586,7 +793,7 @@ def training():
         with db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, source_filename, total_records, imported_by, imported_at
+                    SELECT id, source_filename, total_records, import_type, imported_by, imported_at
                     FROM dataset_import_batches ORDER BY id DESC LIMIT 10
                 """)
                 batches = cur.fetchall()
@@ -594,7 +801,7 @@ def training():
 
     uploaded = request.files.get("dataset")
     if not uploaded or not uploaded.filename:
-        flash("Pilih dataset CSV atau Excel terlebih dahulu.", "danger")
+        flash("Pilih file Excel rekap skor faktor terlebih dahulu.", "danger")
         return redirect(url_for("training"))
 
     original_name = secure_filename(uploaded.filename)
@@ -606,75 +813,103 @@ def training():
     saved_path = UPLOAD_DIR / f"{uuid.uuid4().hex}_{original_name}"
     uploaded.save(saved_path)
     staged_models = []
-
     try:
         source_digest = hashlib.sha256(saved_path.read_bytes()).hexdigest()
-        if extension == ".csv":
-            dataframe = pd.read_csv(saved_path, encoding="utf-8-sig")
+
+        # Prioritas utama: format rekap skor faktor dari perusahaan. Parser mencari header
+        # pada beberapa baris pertama, jadi judul/metadata di atas tabel diperbolehkan.
+        dataframe = read_factor_aggregate_workbook(saved_path) if extension in {".xlsx", ".xls"} else None
+        import_mode = "aggregate" if dataframe is not None else "raw_items"
+        warnings = []
+
+        if import_mode == "aggregate":
+            dataframe, warnings = prepare_aggregate_dataframe(dataframe)
+            feature_type = "factor_category_codes"
+            import_type = "aggregate_factor_scores"
+            source_type = "aggregate"
         else:
-            dataframe = pd.read_excel(saved_path)
+            if extension == ".csv":
+                dataframe = pd.read_csv(saved_path, encoding="utf-8-sig")
+            else:
+                dataframe = pd.read_excel(saved_path)
 
-        dataframe.columns = [str(column).strip() for column in dataframe.columns]
-        answer_columns = [f"answer_{number}" for number in range(1, 31)]
-        label_columns = [factor["label"] for factor in FACTORS]
-        required = answer_columns + label_columns
-        missing = [column for column in required if column not in dataframe.columns]
-        if missing:
-            raise ValueError("Kolom wajib belum lengkap: " + ", ".join(missing))
-        if dataframe.empty:
-            raise ValueError("Dataset tidak memiliki baris data.")
-
-        optional_columns = [
-            column for column in ("employee_code", "employee_name", "department")
-            if column in dataframe.columns
-        ]
-        dataframe = dataframe[optional_columns + required].copy()
-
-        if dataframe[required].isna().any().any():
-            missing_columns = dataframe[required].columns[
-                dataframe[required].isna().any()
-            ].tolist()
-            raise ValueError(
-                "Ada nilai kosong pada kolom wajib: " + ", ".join(missing_columns)
-            )
-
-        for column in answer_columns:
-            numeric = pd.to_numeric(dataframe[column], errors="coerce")
-            if numeric.isna().any() or not np.equal(
-                numeric.to_numpy(), np.floor(numeric.to_numpy())
-            ).all():
-                raise ValueError(f"Kolom {column} harus berisi bilangan bulat.")
-            dataframe[column] = numeric.astype(int)
-            if not dataframe[column].between(1, 7).all():
-                raise ValueError(f"Nilai {column} harus berada pada rentang 1 sampai 7.")
-
-        for column in optional_columns:
-            if column in ("employee_code", "employee_name", "department"):
-                dataframe[column] = dataframe[column].apply(
-                    lambda value: None if pd.isna(value) or str(value).strip() == ""
-                    else str(value).strip()
-                )
-
-        labels_by_factor = {}
-        for factor in FACTORS:
-            label_column = factor["label"]
-            labels = dataframe[label_column].astype(str).str.strip()
-            invalid = sorted(set(labels) - set(CLASSES))
-            if invalid:
+            dataframe.columns = [str(column).strip() for column in dataframe.columns]
+            answer_columns = [f"answer_{number}" for number in range(1, 31)]
+            label_columns = [factor["label"] for factor in FACTORS]
+            required = answer_columns + label_columns
+            missing = [column for column in required if column not in dataframe.columns]
+            if missing:
                 raise ValueError(
-                    f"Label {label_column} tidak valid: {invalid}. "
-                    f"Gunakan salah satu dari: {', '.join(CLASSES)}."
+                    "Workbook bukan format rekap skor faktor yang dikenali dan kolom template jawaban juga tidak lengkap. "
+                    "Kolom yang belum ada: " + ", ".join(missing)
                 )
-            if labels.nunique() < 2:
-                raise ValueError(f"{factor['name']}: dataset harus memiliki minimal dua kelas.")
-            labels_by_factor[factor["key"]] = labels
+            if dataframe.empty:
+                raise ValueError("Dataset tidak memiliki baris data.")
 
-        # Prepare and evaluate six models before writing any submissions.
+            optional_columns = [
+                column for column in ("employee_code", "employee_name", "department")
+                if column in dataframe.columns
+            ]
+            dataframe = dataframe[optional_columns + required].copy()
+            if dataframe[required].isna().any().any():
+                missing_columns = dataframe[required].columns[
+                    dataframe[required].isna().any()
+                ].tolist()
+                raise ValueError(
+                    "Ada nilai kosong pada kolom wajib: " + ", ".join(missing_columns)
+                )
+
+            for column in answer_columns:
+                numeric = pd.to_numeric(dataframe[column], errors="coerce")
+                if numeric.isna().any() or not np.equal(
+                    numeric.to_numpy(), np.floor(numeric.to_numpy())
+                ).all():
+                    raise ValueError(f"Kolom {column} harus berisi bilangan bulat.")
+                dataframe[column] = numeric.astype(int)
+                if not dataframe[column].between(1, 7).all():
+                    raise ValueError(f"Nilai {column} harus berada pada rentang 1 sampai 7.")
+
+            for column in optional_columns:
+                dataframe[column] = dataframe[column].apply(clean_optional_text)
+
+            labels_by_factor = {}
+            for factor in FACTORS:
+                label_column = factor["label"]
+                labels = dataframe[label_column].astype(str).str.strip()
+                invalid = sorted(set(labels) - set(CLASSES))
+                if invalid:
+                    raise ValueError(
+                        f"Label {label_column} tidak valid: {invalid}. "
+                        f"Gunakan salah satu dari: {', '.join(CLASSES)}."
+                    )
+                if labels.nunique() < 2:
+                    raise ValueError(f"{factor['name']}: dataset harus memiliki minimal dua kelas.")
+                labels_by_factor[factor["key"]] = labels
+
+            feature_type = "raw_answers"
+            import_type = "raw_item_answers"
+            source_type = "dataset"
+
+        # Siapkan dan evaluasi enam model sebelum ada transaksi penyimpanan.
         summaries = []
         for factor in FACTORS:
-            labels = labels_by_factor[factor["key"]]
-            feature_columns = [f"answer_{number}" for number in factor["questions"]]
-            features = dataframe[feature_columns].to_numpy(dtype=int) - 1
+            if import_mode == "aggregate":
+                labels = dataframe[factor["label"]].astype(str)
+                feature_factor_keys = [
+                    other["key"] for other in FACTORS if other["key"] != factor["key"]
+                ]
+                features = np.array([[
+                    category_code(rule_class(int(value)))
+                    for value in row
+                ] for row in dataframe[feature_factor_keys].to_numpy(dtype=int)], dtype=int)
+                min_categories = len(CLASSES)
+            else:
+                labels = labels_by_factor[factor["key"]]
+                feature_factor_keys = []
+                feature_columns = [f"answer_{number}" for number in factor["questions"]]
+                features = dataframe[feature_columns].to_numpy(dtype=int) - 1
+                min_categories = 7
+
             class_counts = labels.value_counts()
             accuracy = None
             matrix = None
@@ -694,7 +929,7 @@ def training():
                 x_train, x_test, y_train, y_test = train_test_split(
                     features, labels, test_size=0.25, random_state=42, stratify=labels
                 )
-                evaluation_model = CategoricalNB(min_categories=7, alpha=1.0)
+                evaluation_model = CategoricalNB(min_categories=min_categories, alpha=1.0)
                 evaluation_model.fit(x_train, y_train)
                 predicted_test = evaluation_model.predict(x_test)
                 accuracy = float(accuracy_score(y_test, predicted_test))
@@ -704,11 +939,18 @@ def training():
                     output_dict=True, zero_division=0,
                 )
 
-            final_model = CategoricalNB(min_categories=7, alpha=1.0)
+            final_model = CategoricalNB(min_categories=min_categories, alpha=1.0)
             final_model.fit(features, labels)
+            model_bundle = {
+                "estimator": final_model,
+                "feature_type": feature_type,
+                "feature_factor_keys": feature_factor_keys,
+                "feature_question_numbers": factor["questions"] if feature_type == "raw_answers" else [],
+                "training_mode": import_mode,
+            }
             final_path = model_path(factor)
             temporary_path = MODEL_DIR / f"{factor['key']}.{uuid.uuid4().hex}.joblib.tmp"
-            joblib.dump(final_model, temporary_path)
+            joblib.dump(model_bundle, temporary_path)
             staged_models.append({
                 "factor": factor,
                 "temporary_path": temporary_path,
@@ -723,9 +965,9 @@ def training():
                 "samples": len(dataframe),
                 "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
                 "confusion": matrix,
+                "class_counts": labels.value_counts().to_dict(),
             })
 
-        # Persist batch, respondents, answers, six target labels and metrics atomically.
         with db_connection() as conn:
             try:
                 with conn.cursor() as cur:
@@ -735,25 +977,22 @@ def training():
                     )
                     if cur.fetchone():
                         raise ValueError(
-                            "File dataset yang sama sudah pernah diimpor. "
-                            "Periksa riwayat training untuk menghindari submission duplikat."
+                            "File dengan isi yang sama sudah pernah diimpor. "
+                            "Periksa riwayat training agar submission tidak terduplikasi."
                         )
 
                     cur.execute("""
                         INSERT INTO dataset_import_batches
-                        (source_filename, source_sha256, total_records, imported_by)
-                        VALUES(%s, %s, %s, %s)
+                        (source_filename, source_sha256, total_records, imported_by, import_type)
+                        VALUES(%s, %s, %s, %s, %s)
                     """, (
                         original_name, source_digest, len(dataframe),
-                        session.get("admin_username"),
+                        session.get("admin_username"), import_type,
                     ))
                     batch_id = cur.lastrowid
 
                     for row_index, row in dataframe.reset_index(drop=True).iterrows():
-                        employee_name = (
-                            row.get("employee_name")
-                            or f"Responden {row_index + 1:03d}"
-                        )
+                        employee_name = row.get("employee_name") or f"Responden {row_index + 1:03d}"
                         employee_code = row.get("employee_code")
                         department = row.get("department")
 
@@ -765,35 +1004,48 @@ def training():
                             (employee_name, employee_code, department),
                         )
                         employee_id = cur.lastrowid
-                        answers = {
-                            number: int(row[f"answer_{number}"])
-                            for number in range(1, 31)
-                        }
+                        if import_mode == "aggregate":
+                            total_score = int(row["total_score"])
+                        else:
+                            answers = {
+                                number: int(row[f"answer_{number}"])
+                                for number in range(1, 31)
+                            }
+                            total_score = sum(answers.values())
+
                         cur.execute(
                             """
                             INSERT INTO submissions
                             (employee_id, total_score, source_type, source_batch_id)
-                            VALUES(%s, %s, 'dataset', %s)
+                            VALUES(%s, %s, %s, %s)
                             """,
-                            (employee_id, sum(answers.values()), batch_id),
+                            (employee_id, total_score, source_type, batch_id),
                         )
                         submission_id = cur.lastrowid
 
-                        cur.executemany(
-                            """
-                            INSERT INTO answers(submission_id, question_no, answer)
-                            VALUES(%s, %s, %s)
-                            """,
-                            [
-                                (submission_id, question_no, answers[question_no])
-                                for question_no in range(1, 31)
-                            ],
-                        )
+                        if import_mode == "raw_items":
+                            cur.executemany(
+                                """
+                                INSERT INTO answers(submission_id, question_no, answer)
+                                VALUES(%s, %s, %s)
+                                """,
+                                [
+                                    (submission_id, question_no, answers[question_no])
+                                    for question_no in range(1, 31)
+                                ],
+                            )
 
                         factor_result_rows = []
                         for factor in FACTORS:
-                            factor_score = sum(answers[q] for q in factor["questions"])
-                            training_label = labels_by_factor[factor["key"]].iloc[row_index]
+                            if import_mode == "aggregate":
+                                factor_score = int(row[factor["key"]])
+                                training_label = str(row[factor["label"]])
+                                model_version = "Naive Bayes · fitur kategori lima faktor lain"
+                            else:
+                                factor_score = sum(answers[q] for q in factor["questions"])
+                                training_label = str(labels_by_factor[factor["key"]].iloc[row_index])
+                                model_version = "Label dataset (belum merupakan prediksi model)"
+
                             factor_result_rows.append((
                                 submission_id,
                                 factor["key"],
@@ -801,9 +1053,9 @@ def training():
                                 factor_score,
                                 rule_class(factor_score),
                                 training_label,
-                                None,   # Imported training rows have a target label, not a prediction.
                                 None,
-                                "Label dataset (belum merupakan prediksi model)",
+                                None,
+                                model_version,
                             ))
                         cur.executemany(
                             """
@@ -837,21 +1089,41 @@ def training():
                 conn.rollback()
                 raise
 
-        # Publish the model artifacts only after the database transaction succeeds.
         for item in staged_models:
             os.replace(item["temporary_path"], item["final_path"])
 
-        flash(
-            f"Berhasil mengimpor {len(dataframe)} responden sebagai submission batch #{batch_id} "
-            "dan melatih enam model Naive Bayes.",
-            "success",
-        )
+        if import_mode == "aggregate":
+            flash(
+                f"Berhasil mengimpor {len(dataframe)} responden dari rekap skor faktor "
+                f"sebagai batch #{batch_id} dan melatih enam model Naive Bayes.",
+                "success",
+            )
+            feature_note = (
+                "Fitur model: kategori lima faktor lainnya. Target tiap model: kategori faktor yang diprediksi."
+            )
+            method_note = (
+                "Workbook hanya berisi skor agregat enam faktor. Kategori target diturunkan dari skor dengan aturan "
+                "≤ 9 Ringan, 10–24 Sedang, dan > 24 Berat. Tidak ada jawaban 30 item yang dibuat atau direkonstruksi."
+            )
+        else:
+            flash(
+                f"Berhasil mengimpor {len(dataframe)} responden sebagai submission batch #{batch_id} "
+                "dan melatih enam model Naive Bayes.",
+                "success",
+            )
+            feature_note = "Fitur model: lima jawaban item pada faktor masing-masing."
+            method_note = "Label target diambil dari kolom label pada dataset template."
+
         return render_template(
             "training_result.html",
             summaries=summaries,
             classes=CLASSES,
             imported_count=len(dataframe),
             batch_id=batch_id,
+            import_mode=import_mode,
+            warnings=warnings,
+            feature_note=feature_note,
+            method_note=method_note,
         )
 
     except Exception as error:
