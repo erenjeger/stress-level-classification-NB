@@ -4,7 +4,7 @@
 <section class="page-heading"><div><p class="eyebrow">MODEL EVALUATION</p><h1>Evaluasi model</h1><p class="muted">Confusion matrix dan classification report per faktor, berdasarkan holdout evaluation terakhir.</p></div><a class="button button-secondary" href="{{ url_for('training') }}">Training ulang</a></section>
 {% if rows %}
   {% for row in rows %}
-    <section class="panel section-panel">
+    <section class="report-section">
       <div class="section-heading"><div><p class="eyebrow">{{ row.factor_key|replace('_',' ')|upper }}</p><h2>{% for factor in factors %}{% if factor.key == row.factor_key %}{{ factor.name }}{% endif %}{% endfor %}</h2></div><span class="score-pill">{{ row.sample_count }} sampel</span></div>
       <p class="muted small">Training: {{ row.trained_at }}</p>
       {% if row.accuracy is not none %}<div class="metric-highlight"><strong>{{ "%.2f"|format(row.accuracy * 100) }}%</strong><span>Akurasi holdout</span></div>{% else %}<div class="notice notice-warning">Evaluasi holdout belum tersedia karena jumlah atau distribusi sampel belum mencukupi.</div>{% endif %}
