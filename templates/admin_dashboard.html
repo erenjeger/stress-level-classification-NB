@@ -34,12 +34,11 @@
 <section class="dashboard-section">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">HASIL KLASIFIKASI</p>
-      <h2>Distribusi kategori per faktor</h2>
+      <h2>Kategori tersimpan per faktor</h2>
     </div>
     <a class="text-link" href="{{ url_for('import_aggregate') }}">Lihat rincian sumber hasil →</a>
   </div>
-  <p class="muted small">Rekap perusahaan menggunakan kategori turunan dari skor faktor. Dataset lama menggunakan label yang diimpor. Form karyawan menampilkan prediksi Naive Bayes atau aturan skor jika model belum tersedia.</p>
+  <p class="muted small">Angka berikut menggabungkan seluruh sumber data. Untuk membedakan kategori turunan skor, label dataset, dan prediksi form, gunakan halaman Analisis Data.</p>
   {% if distribution %}
     <div class="distribution-list">
       {% for item in distribution %}
@@ -60,7 +59,6 @@
 <section class="dashboard-section">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">STATUS MODEL</p>
       <h2>Training terakhir per faktor</h2>
     </div>
     <a class="text-link" href="{{ url_for('training') }}">Kelola data training →</a>
@@ -89,7 +87,6 @@
 <section class="dashboard-section">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">AKTIVITAS TERBARU</p>
       <h2>Submission terakhir</h2>
     </div>
     <a class="text-link" href="{{ url_for('export_excel') }}">Unduh data →</a>
