@@ -3,15 +3,24 @@
 {% block content %}
 <section class="auth-wrap">
   <div class="auth-card panel">
-    <p class="eyebrow">AREA ADMINISTRATOR</p>
-    <h1>Selamat datang kembali.</h1>
-    <p class="muted">Masuk untuk mengelola data dan model klasifikasi.</p>
+    <p class="eyebrow">AKSES ADMINISTRATOR</p>
+    <h1>Masuk ke panel admin</h1>
+    <p class="muted">Kelola data rekap, submission, dan model klasifikasi melalui akun administrator.</p>
+
     <form method="post" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label class="field"><span>Username</span><input name="username" autocomplete="username" required autofocus></label>
-      <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
-      <button class="button button-primary button-large" type="submit">Login</button>
+      <label class="field">
+        <span>Username</span>
+        <input type="text" name="username" autocomplete="username" required autofocus placeholder="Masukkan username">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required placeholder="Masukkan password">
+      </label>
+      <button class="button button-primary button-large" type="submit">Masuk</button>
     </form>
+
+    <div class="auth-footnote">Akses ini khusus administrator yang berwenang mengelola data penelitian.</div>
     <a class="back-link" href="{{ url_for('home') }}">← Kembali ke kuesioner</a>
   </div>
 </section>
