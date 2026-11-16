@@ -2,7 +2,7 @@
 {% block title %}Analisis Submission · StressCheck{% endblock %}
 {% block content %}
 <section class="page-heading aggregate-heading">
-  <div><p class="eyebrow">ANALYTICS · DATA SUBMISSION</p><h1>Analisis submission</h1><p class="muted">Statistik diambil langsung dari submission kuesioner dan hasil enam faktor yang tersimpan di database.</p></div>
+  <div><p class="eyebrow">ANALYTICS · DATA SUBMISSION</p><h1>Analisis submission</h1><p class="muted">Statistik diambil dari pengisian form, dataset jawaban item, dan workbook rekap skor agregat enam faktor.</p></div>
   <a class="button button-primary" href="{{ url_for('export_aggregate_excel', source=source_filter, department=department_filter, batch_id=batch_id) }}">↓ Ekspor analisis Excel</a>
 </section>
 
@@ -10,7 +10,8 @@
   <form method="get" action="{{ url_for('import_aggregate') }}" class="aggregate-filter-form aggregate-filter-wide">
     <label class="field"><span>Sumber submission</span><select name="source">
       <option value="all" {% if source_filter == 'all' %}selected{% endif %}>Semua sumber</option>
-      <option value="dataset" {% if source_filter == 'dataset' %}selected{% endif %}>Import dataset training</option>
+      <option value="aggregate" {% if source_filter == 'aggregate' %}selected{% endif %}>Rekap skor faktor perusahaan</option>
+      <option value="dataset" {% if source_filter == 'dataset' %}selected{% endif %}>Dataset jawaban item</option>
       <option value="form" {% if source_filter == 'form' %}selected{% endif %}>Form karyawan langsung</option>
     </select></label>
     <label class="field"><span>Batch training</span><select name="batch_id">
@@ -23,17 +24,19 @@
     </select></label>
     <div class="filter-actions"><button class="button button-primary" type="submit">Terapkan</button><a class="button button-secondary" href="{{ url_for('import_aggregate') }}">Reset</a></div>
   </form>
-  {% if selected_batch %}<div class="batch-meta"><span><strong>Batch:</strong> #{{ selected_batch.id }}</span><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Jumlah:</strong> {{ selected_batch.total_records }} responden</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span></div>{% endif %}
+  {% if selected_batch %}<div class="batch-meta"><span><strong>Batch:</strong> #{{ selected_batch.id }}</span><span><strong>File:</strong> {{ selected_batch.source_filename }}</span><span><strong>Jumlah:</strong> {{ selected_batch.total_records }} responden</span><span><strong>Jenis:</strong> {% if selected_batch.import_type == 'aggregate_factor_scores' %}Rekap skor faktor{% else %}Jawaban item{% endif %}</span><span><strong>Diimpor:</strong> {{ selected_batch.imported_at }}</span></div>{% endif %}
 </section>
 
 <div class="notice notice-info aggregate-note">
   <strong>Interpretasi kategori:</strong>
-  {% if source_filter == 'dataset' %}
-    distribusi kategori berasal dari <code>training_label</code> yang diunggah bersama dataset.
+  {% if source_filter == 'aggregate' %}
+    kategori untuk workbook rekap dihitung dari skor agregat per faktor dengan ambang ≤ 9 Ringan, 10–24 Sedang, dan > 24 Berat. Kategori ini adalah target turunan dari skor, bukan label teks asli dari perusahaan.
+  {% elif source_filter == 'dataset' %}
+    distribusi kategori berasal dari <code>training_label</code> yang disertakan bersama dataset jawaban item.
   {% elif source_filter == 'form' %}
     distribusi kategori berasal dari <code>predicted_class</code> jika model tersedia; jika belum, aplikasi menggunakan fallback aturan skor.
   {% else %}
-    hasil menggabungkan submission dataset (label target), form langsung (prediksi model), dan form yang belum menggunakan model (fallback aturan skor). Periksa sumber kategori pada setiap faktor.
+    hasil menggabungkan kategori turunan workbook rekap, label dataset jawaban item, prediksi model pada form, dan fallback aturan skor. Periksa sumber kategori pada setiap faktor.
   {% endif %}
   Label training tidak dianggap sebagai prediksi Naive Bayes.
 </div>
@@ -42,7 +45,7 @@
 <section class="aggregate-kpis">
   <article class="stat-card"><span class="stat-label">Jumlah submission</span><strong>{{ report.respondents }}</strong><span class="stat-foot">Sesuai filter aktif</span></article>
   <article class="stat-card"><span class="stat-label">Identitas responden unik</span><strong>{{ report.unique_employees }}</strong><span class="stat-foot">Bukan ID unik jika kode tidak disediakan</span></article>
-  <article class="stat-card"><span class="stat-label">Rata-rata total skor</span><strong>{{ report.average_total }}</strong><span class="stat-foot">Total 30 jawaban per submission</span></article>
+  <article class="stat-card"><span class="stat-label">Rata-rata total skor</span><strong>{{ report.average_total }}</strong><span class="stat-foot">Jumlah skor enam faktor per submission</span></article>
   <article class="stat-card"><span class="stat-label">Departemen</span><strong>{{ report.departments|length }}</strong><span class="stat-foot">Setelah filter diterapkan</span></article>
 </section>
 
@@ -89,7 +92,7 @@
   {% if rows %}<div class="table-wrap"><table class="aggregate-detail-table">
     <thead><tr><th>Submission</th><th>Responden</th><th>Kode</th><th>Departemen</th><th>Sumber</th><th>Batch</th><th>Ketaksaan</th><th>Konflik</th><th>Beban Kuantitatif</th><th>Beban Kualitatif</th><th>Karir</th><th>Tanggung Jawab</th><th>Total</th></tr></thead>
     <tbody>{% for row in rows %}<tr>
-      <td>#{{ row.submission_id }}</td><td><strong>{{ row.employee_name }}</strong></td><td>{{ row.employee_code or '—' }}</td><td>{{ row.department or '—' }}</td><td>{{ row.source_type }}</td><td>{{ row.source_batch_id or '—' }}</td>
+      <td>#{{ row.submission_id }}</td><td><strong>{{ row.employee_name }}</strong></td><td>{{ row.employee_code or '—' }}</td><td>{{ row.department or '—' }}</td><td>{% if row.source_type == 'aggregate' %}Rekap faktor{% elif row.source_type == 'dataset' %}Dataset item{% else %}Form{% endif %}</td><td>{{ row.source_batch_id or '—' }}</td>
       <td>{{ row.scores['ketaksaan_peran'] }}</td><td>{{ row.scores['konflik_peran'] }}</td><td>{{ row.scores['beban_kuantitatif'] }}</td><td>{{ row.scores['beban_kualitatif'] }}</td><td>{{ row.scores['pengembangan_karir'] }}</td><td>{{ row.scores['tanggung_jawab'] }}</td><td><strong>{{ row.total_score }}</strong></td>
     </tr>{% endfor %}</tbody>
   </table></div>
