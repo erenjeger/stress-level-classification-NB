@@ -2,7 +2,7 @@
 {% block title %}Analisis Submission · StressCheck{% endblock %}
 {% block content %}
 <section class="page-heading aggregate-heading">
-  <div><p class="eyebrow">ANALYTICS · DATA SUBMISSION</p><h1>Analisis submission</h1><p class="muted">Statistik diambil dari pengisian form, dataset jawaban item, dan workbook rekap skor agregat enam faktor.</p></div>
+  <div><h1>Analisis data</h1><p class="muted">Statistik diambil dari pengisian form, dataset jawaban item, dan workbook rekap skor agregat enam faktor.</p></div>
   <a class="button button-primary" href="{{ url_for('export_aggregate_excel', source=source_filter, department=department_filter, batch_id=batch_id) }}">↓ Ekspor analisis Excel</a>
 </section>
 
@@ -50,7 +50,7 @@
 </section>
 
 <section class="report-section aggregate-section">
-  <div class="section-heading"><div><p class="eyebrow">RINGKASAN FAKTOR</p><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Rentang teoritis 5–35</span></div>
+  <div class="section-heading"><div><h2>Rata-rata skor enam faktor</h2></div><span class="muted small">Rentang teoritis 5–35</span></div>
   <div class="factor-average-list">{% for factor in report.factors %}
     <div class="factor-average-item"><div class="factor-average-head"><strong>{{ factor.name }}</strong><span><b>{{ factor.average }}</b> / 35</span></div>
       <div class="aggregate-track"><span style="width: {{ (factor.average / 35 * 100)|round(1) }}%"></span></div>
@@ -60,7 +60,7 @@
 </section>
 
 <section class="report-section aggregate-section">
-  <div class="section-heading"><div><p class="eyebrow">DISTRIBUSI KATEGORI</p><h2>Kategori per faktor</h2></div><span class="muted small">Sesuai sumber kategori di atas</span></div>
+  <div class="section-heading"><div><h2>Kategori per faktor</h2></div><span class="muted small">Sesuai sumber kategori di atas</span></div>
   <div class="distribution-analysis">{% for factor in report.factors %}
     <div class="distribution-analysis-item">
       <div class="distribution-analysis-title"><strong>{{ factor.name }}</strong><span class="muted small">{{ factor.count }} hasil</span></div>
@@ -81,14 +81,14 @@
 </section>
 
 <section class="report-section aggregate-section">
-  <div class="section-heading"><div><p class="eyebrow">PERBANDINGAN DEPARTEMEN</p><h2>Skor berdasarkan departemen</h2></div><span class="muted small">{{ report.departments|length }} departemen</span></div>
+  <div class="section-heading"><div><h2>Skor berdasarkan departemen</h2></div><span class="muted small">{{ report.departments|length }} departemen</span></div>
   {% if report.departments %}<div class="table-wrap"><table><thead><tr><th>Departemen</th><th>Submission</th><th>Rata-rata total</th>{% for factor in report.factors %}<th>{{ factor.name }}</th>{% endfor %}</tr></thead><tbody>
     {% for department in report.departments %}<tr><td><strong>{{ department.name }}</strong></td><td>{{ department.count }}</td><td>{{ department.average_total }}</td>{% for factor in report.factors %}<td>{{ department.averages[factor.key] }}</td>{% endfor %}</tr>{% endfor %}
   </tbody></table></div>{% else %}<div class="empty-state">Belum ada data departemen pada filter ini.</div>{% endif %}
 </section>
 
 <section class="report-section aggregate-section">
-  <div class="section-heading"><div><p class="eyebrow">DETAIL RESPONDEN</p><h2>Data submission</h2></div><span class="muted small">Menampilkan {{ rows|length }} dari {{ total_filtered }} submission</span></div>
+  <div class="section-heading"><div><h2>Data submission</h2></div><span class="muted small">Menampilkan {{ rows|length }} dari {{ total_filtered }} submission</span></div>
   {% if rows %}<div class="table-wrap"><table class="aggregate-detail-table">
     <thead><tr><th>Submission</th><th>Responden</th><th>Kode</th><th>Departemen</th><th>Sumber</th><th>Batch</th><th>Ketaksaan</th><th>Konflik</th><th>Beban Kuantitatif</th><th>Beban Kualitatif</th><th>Karir</th><th>Tanggung Jawab</th><th>Total</th></tr></thead>
     <tbody>{% for row in rows %}<tr>
